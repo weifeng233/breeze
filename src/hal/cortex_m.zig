@@ -28,6 +28,7 @@
 //! Observe what `SysTick_Handler` does *not* do: it does not run the scheduler,
 //! does not allocate, and does not print. The scheduler runs in thread mode.
 
+const std = @import("std");
 const tick = @import("../kernel/tick.zig");
 const shared = @import("../kernel/shared.zig");
 const Channel = @import("../kernel/chan.zig").Channel;
@@ -54,17 +55,57 @@ var reload: u32 = 0;
 
 /// Configure SysTick to interrupt every millisecond.
 ///
-/// `cpu_hz` is the core clock feeding SysTick. The reload value is clamped to
-/// the 24-bit SysTick range; a core slower than 1 MHz cannot produce a 1 ms
-/// tick this way and is rejected at comptime.
+/// `cpu_hz` is the core clock feeding SysTick.
+///
+/// # Why 1 MHz is the floor, and why it is not just a style rule
+///
+/// The reload is `cpu_hz / 1000 - 1`. If `cpu_hz` were allowed down to 1 kHz
+/// that expression reaches **zero**, and a SysTick reload of zero does not
+/// reload the counter: the tick never fires again and the timebase silently
+/// stops advancing, so every `wait_ms` in the application hangs forever. The
+/// previous check was `< 1000`, which let exactly that value through while its
+/// message claimed 1 MHz.
+///
+/// # Tick accuracy
+///
+/// The division truncates, so the period is `floor(cpu_hz / 1000)` cycles
+/// rather than the exact `cpu_hz / 1000`. The tick is therefore never *longer*
+/// than a millisecond, and the clock runs fractionally fast by at most
+///
+///     (cpu_hz % 1000) / cpu_hz     (relative)
+///
+/// which is 0.1% at 1 MHz and 0.002% at 48 MHz. Choosing a core frequency that
+/// is a whole multiple of 1 kHz makes the remainder zero and the tick exact;
+/// the usual 8/16/24/48/64/96/120/150/160/180/200/240 MHz all qualify.
+///
+/// SysTick reloads itself from a single fixed value, so unlike the RISC-V
+/// backend it cannot average a fractional period across ticks. The rounding
+/// error is bounded rather than corrected - see `kernel/tick.zig`'s
+/// `MillisecondGrid` for the one-shot case where it can be.
 pub fn init(comptime cpu_hz: u32) void {
     comptime {
-        if (cpu_hz < 1000) {
-            @compileError("cpu_hz must be at least 1 MHz for a 1 ms SysTick reload");
+        if (cpu_hz < 1_000_000) {
+            @compileError(std.fmt.comptimePrint(
+                "cpu_hz must be at least 1 MHz for a 1 ms SysTick; got {d} Hz. " ++
+                    "The reload is cpu_hz / 1000 - 1, which reaches zero below " ++
+                    "1 MHz, and a zero reload stops the counter instead of " ++
+                    "producing a tick.",
+                .{cpu_hz},
+            ));
+        }
+        // A clock above ~16.7 GHz would not fit the 24-bit reload. This used to
+        // be clamped silently, which quietly produced the wrong tick period;
+        // rejecting is better than a period nobody asked for.
+        if (cpu_hz / 1000 - 1 > 0x00FF_FFFF) {
+            @compileError(std.fmt.comptimePrint(
+                "cpu_hz = {d} Hz exceeds the 24-bit SysTick reload range; " ++
+                    "the largest supported value is 16.777 GHz",
+                .{cpu_hz},
+            ));
         }
     }
+
     reload = cpu_hz / 1000 - 1;
-    if (reload > 0x00FF_FFFF) reload = 0x00FF_FFFF;
 
     systick_load.* = reload;
     systick_val.* = 0;
@@ -94,7 +135,9 @@ pub inline fn tickPending() bool {
     return (systick_ctrl.* & ctrl_countflag) != 0;
 }
 
-/// CPU frequency the SysTick was configured with, in Hz.
+/// The SysTick reload value `init` programmed, i.e. the tick period in core
+/// cycles minus one. Not the CPU frequency; see `reloadValue`'s sibling
+/// `now()` for the timebase itself.
 pub inline fn reloadValue() u32 {
     return reload;
 }

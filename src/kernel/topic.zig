@@ -56,6 +56,7 @@
 //! target is little-endian. Cortex-M and RISC-V both are.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 // --- checksums -------------------------------------------------------------
 
@@ -131,6 +132,54 @@ pub fn Topic(comptime name: []const u8, comptime Payload: type) type {
                 "Topic '" ++ name ++ "' payload must be an `extern struct` so that its byte " ++
                     "layout is defined; a plain struct has no guaranteed layout",
             );
+        }
+
+        // The payload is copied out as raw bytes, so every property that makes
+        // those bytes meaningful has to hold. These checks turn a class of
+        // bug that would otherwise appear as "the host decodes garbage" into a
+        // compile error naming the field.
+        if (builtin.cpu.arch.endian() != .little) {
+            @compileError(
+                "Topic '" ++ name ++ "' packs its payload as raw struct bytes, which is " ++
+                    "only the wire format on little-endian targets. This target is big-endian.",
+            );
+        }
+
+        var packed_size: usize = 0;
+        for (info.fields) |f| {
+            // A field whose width depends on the pointer size would make the
+            // frame layout differ between RV32 and RV64 for the *same* source.
+            if (f.type == usize or f.type == isize) {
+                @compileError(
+                    "Topic '" ++ name ++ "' field '" ++ f.name ++ "' is " ++ @typeName(f.type) ++
+                        ", whose width follows the target's pointer size; use a fixed-width " ++
+                        "integer so the frame is identical on every target",
+                );
+            }
+            switch (@typeInfo(f.type)) {
+                .pointer => @compileError(
+                    "Topic '" ++ name ++ "' field '" ++ f.name ++ "' is a pointer. Pointers " ++
+                        "are meaningless to a host parser and their width varies by target.",
+                ),
+                else => {},
+            }
+            packed_size += @sizeOf(f.type);
+        }
+
+        // Padding bytes are copied into the frame but are not part of any
+        // field, and Zig does not promise to initialise them. Two packs of the
+        // same value could therefore produce different bytes, and `unpack`
+        // would write indeterminate bytes back into the payload. The frame's
+        // own CRC covers whatever was sent, so a receiver cannot detect it.
+        if (packed_size != @sizeOf(Payload)) {
+            @compileError(std.fmt.comptimePrint(
+                "Topic '{s}' payload has {d} byte(s) of padding ({d} bytes of fields, " ++
+                    "{d} bytes of struct). Padding is copied into the frame but is never " ++
+                    "initialised, so the same value can serialise to different bytes. " ++
+                    "Reorder the fields, or add explicitly named padding fields so the " ++
+                    "bytes are deterministic.",
+                .{ name, @sizeOf(Payload) - packed_size, packed_size, @sizeOf(Payload) },
+            ));
         }
     }
 

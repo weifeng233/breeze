@@ -368,6 +368,203 @@ test "two periodic tasks keep independent grids" {
     try std.testing.expectEqual(@as(u32, 0), sched.worstLateness());
 }
 
+test "a periodic task keeps its rate across the u32 tick wrap" {
+    // Every comparison in the kernel is a signed difference, so the wrap at
+    // 2^32 ms should be invisible: the grid must keep its spacing and report no
+    // lateness, rather than stalling for 24 days or bursting.
+    //
+    // The clock is started 200 ms *before* the wrap, which also pins a piece of
+    // startup semantics worth being explicit about. A task's grid begins at
+    // `next_run = 0`, and `reached(now, 0)` is a signed comparison, so while
+    // the clock reads in the upper half of the u32 range it is interpreted as
+    // "0 is still 200 ms in the future" - correctly, because that is what a
+    // wrapped clock means. The first activation therefore lands at 0, not at
+    // `start`, and nothing fires during the 200 ms before it.
+    //
+    // On real hardware the tick counter begins at 0 and this cannot arise: a
+    // scheduler started at a small positive `now` is due immediately. The case
+    // only appears when a test jumps the clock into the far future, which is
+    // exactly what this test does.
+    Fixture.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{ .name = "p20", .period_ms = 20, .ctx = &Fixture.fire_count, .poll = Fixture.Capture.poll },
+    });
+    var sched = S.init();
+
+    const start: Tick = 0xFFFF_FF38; // 200 ms before the wrap
+    var i: u32 = 0;
+    while (i < 400) : (i += 1) {
+        host.HostHal.setNow(start +% i);
+        sched.run();
+
+        // Nothing may run while the clock still reads as "before 0".
+        if (i < 200) {
+            try std.testing.expectEqual(@as(u32, 0), Fixture.fire_count);
+        }
+    }
+
+    // 200 ms of post-wrap ticks at 20 ms is 10 activations.
+    try std.testing.expectEqual(@as(u32, 10), Fixture.fire_count);
+
+    // The first lands exactly on the wrap point, and the rest keep the grid.
+    try std.testing.expectEqual(@as(Tick, 0), Fixture.fire_ticks[0]);
+    try std.testing.expectEqual(@as(Tick, 180), Fixture.fire_ticks[9]);
+
+    var k: u32 = 1;
+    while (k < Fixture.fire_count) : (k += 1) {
+        const gap = Fixture.fire_ticks[k] -% Fixture.fire_ticks[k - 1];
+        try std.testing.expectEqual(@as(Tick, 20), gap);
+    }
+
+    // No lateness and no resynchronisation: the wrap is not an error.
+    try std.testing.expectEqual(@as(u32, 0), sched.worstLateness());
+    try std.testing.expectEqual(@as(u32, 0), sched.totalResyncs());
+}
+
+test "a deadline set before the wrap is honoured after it" {
+    // The other half of wrap safety: a deadline computed before the wrap must
+    // still be reached afterwards, and must not read as reached too early.
+    Fixture.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{ .name = "p100", .period_ms = 100, .ctx = &Fixture.fire_count, .poll = Fixture.Capture.poll },
+    });
+    var sched = S.init();
+
+    // Establish the grid at t = 0xFFFFFFE0, 32 ms before the wrap.
+    host.HostHal.setNow(0xFFFF_FFE0);
+    sched.states[0].next_run = 0xFFFF_FFE0;
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 1), Fixture.fire_count);
+    try std.testing.expectEqual(@as(Tick, 0xFFFF_FFE0), Fixture.fire_ticks[0]);
+    // Next slot is 100 ms later, which is on the far side of the wrap.
+    try std.testing.expectEqual(@as(Tick, 0x0000_0044), sched.states[0].next_run);
+
+    // It must not fire early, on any tick before that deadline.
+    var t: Tick = 0xFFFF_FFE1;
+    while (t != 0x0000_0044) : (t +%= 1) {
+        host.HostHal.setNow(t);
+        sched.run();
+        try std.testing.expectEqual(@as(u32, 1), Fixture.fire_count);
+    }
+
+    // And it must fire exactly on the deadline.
+    host.HostHal.setNow(0x0000_0044);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 2), Fixture.fire_count);
+    try std.testing.expectEqual(@as(Tick, 0x0000_0044), Fixture.fire_ticks[1]);
+    try std.testing.expectEqual(@as(u32, 0), sched.worstLateness());
+}
+
+test "an event raised by an ISR mid-pass is delivered on the next pass" {
+    // The scheduler snapshots the event mask once per pass and hands that
+    // snapshot to every task, so an ISR arriving during the pass must not
+    // change what the current pass's tasks observe - but it must be visible on
+    // the following one, which is what makes event-driven tasks make progress
+    // at all.
+    //
+    // This test also pins the *trigger semantics*, which are easy to get wrong:
+    // a flag is level-triggered and is never cleared automatically. Combined
+    // with `Program` restarting itself once it runs off the end, a task that
+    // waits on a flag nobody consumes will re-run on every single pass. That is
+    // by design - clearing is the caller's job, via `clearEvents` - but it is
+    // the kind of design that has to be visible, so it is asserted here rather
+    // than described only in a comment.
+    Fixture.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{ .name = "evt", .period_ms = 0, .ctx = &Fixture.evt_ctx, .poll = Fixture.EvtCtx.poll },
+    });
+    var sched = S.init();
+
+    // Pass 1: nothing raised yet, so the program parks on `wait_event`.
+    host.HostHal.setNow(0);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 0), Fixture.seen);
+
+    // An ISR raises the flag between passes - the interleaving a real UART or
+    // timer interrupt produces.
+    sched.events.setFromIsr(Fixture.Ack);
+
+    // Pass 2: the new snapshot carries the flag, the program runs to the end.
+    host.HostHal.setNow(1);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 1), Fixture.seen);
+
+    // Pass 3: the program finished, so it restarted at instruction 0; the flag
+    // is still set, so `wait_event` is satisfied immediately and it marks
+    // again. Two marks, one event.
+    host.HostHal.setNow(2);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 2), Fixture.seen);
+
+    // Consuming the flag is what stops it repeating.
+    sched.clearEvents(Fixture.Ack);
+    host.HostHal.setNow(3);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 2), Fixture.seen);
+}
+
+test "a level-triggered flag re-fires every pass until it is cleared" {
+    // The same property without a Program in the way, so the semantics are
+    // stated on their own: `isSet` stays true, and the only thing that ends the
+    // condition is an explicit `clearEvents`.
+    Fixture.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{ .name = "p", .period_ms = 0, .ctx = &Fixture.counter_a, .poll = Fixture.CountA.poll },
+    });
+    var sched = S.init();
+
+    sched.events.setFromIsr(Fixture.Ack);
+
+    var pass: u32 = 0;
+    while (pass < 5) : (pass += 1) {
+        host.HostHal.setNow(pass);
+        sched.run();
+        // Still set after every pass, because nothing consumed it.
+        try std.testing.expect(sched.events.isSet(Fixture.Ack));
+    }
+    // And the task ran on every one of those passes.
+    try std.testing.expectEqual(@as(u32, 5), Fixture.counter_a);
+
+    sched.clearEvents(Fixture.Ack);
+    try std.testing.expect(!sched.events.isSet(Fixture.Ack));
+}
+
+test "clearing one event does not disturb another raised during the pass" {
+    // A task that consumes the flag it saw must not consume a flag that
+    // arrived while it was working; otherwise an event is lost until the next
+    // pass, and for an edge-like source, lost for good.
+    Fixture.reset();
+
+    const OTHER: u32 = 0x0002;
+
+    const S = Scheduler(host.HostHal, .{
+        .{ .name = "p", .period_ms = 0, .ctx = &Fixture.counter_a, .poll = Fixture.CountA.poll },
+    });
+    var sched = S.init();
+
+    host.HostHal.setNow(0);
+    sched.events.setFromIsr(Fixture.Ack);
+    const snapshot = sched.events.snapshot();
+    try std.testing.expect((snapshot & Fixture.Ack) != 0);
+    try std.testing.expect((snapshot & OTHER) == 0);
+
+    // The second event arrives after the snapshot was taken.
+    sched.events.setFromIsr(OTHER);
+
+    // Consuming the first must leave the second alone.
+    sched.clearEvents(Fixture.Ack);
+    try std.testing.expect(!sched.events.isSet(Fixture.Ack));
+    try std.testing.expect(sched.events.isSet(OTHER));
+
+    // The snapshot the tasks were handed is unchanged, so every task in the
+    // pass agreed on what it saw.
+    try std.testing.expectEqual(Fixture.Ack, snapshot);
+}
+
 test "a suspended sequence is re-polled promptly instead of waiting a period" {
     Fixture.reset();
 

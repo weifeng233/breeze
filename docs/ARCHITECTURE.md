@@ -99,7 +99,8 @@ picolibc 归档里，而许多工程用 `-fno-compiler-rt` 编译 Zig 对象。
 ## 4. 实测数据
 
 环境：Zig 0.16.0，`-OReleaseSmall -fstrip -fno-unwind-tables -fno-compiler-rt`。
-`zig build ci` 全绿：**59 个单元测试 + 6 个目标交叉编译**。
+`zig build ci` 全绿。测试与目标的数量以 [README](../README.md) 的状态行为准，
+本文件不再重复——重复过的数字已经漂移过三次，CI 现在会校验 README 里那一个。
 
 **每任务开销（编译期精确）**
 
@@ -182,9 +183,9 @@ applications/             基于旧 C 算法库的应用示例（同上）
 ## 6. 构建
 
 ```bash
-zig build test           # 59 个单元测试
+zig build test           # 单元测试（数量见 README 状态行）
 zig build demo           # 主机虚拟时钟演示
-zig build check-targets  # 交叉编译 6 个目标
+zig build check-targets  # 交叉编译所有目标
 zig build ci             # 格式检查 + 测试 + 目标编译
 ```
 

@@ -3,8 +3,9 @@
 面向 **ARM Cortex-M** 与 **RISC-V** 裸机目标的确定性协作式任务内核，用现代 Zig 编写。
 同一份内核可以在主机上用虚拟时钟运行，因此固件逻辑能在工作站上被精确断言。
 
-> **状态**：内核与模块系统已实现。`zig build ci` 通过：**59 个单元测试**、
-> **6 个目标交叉编译**（含智能车竞赛的 CYT2BL3 / CYT4BB7 / RT1064）。
+> **状态**：内核与模块系统已实现。`zig build ci` 通过：**75 个单元测试**、
+> **7 个目标交叉编译**（CYT2BL3、CYT4BB7 的 CM0+ 与 CM7、RT1064 各有一个具名目标）。
+> 这两个数字由 CI 校验，不允许漂移（见 `.github/workflows/ci.yml`）。
 > C 版本算法库仍保留在 `include/`、`src/` 中作为迁移参考，**但它当前无法编译**，
 > 原因见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 第 8 节。
 
@@ -116,9 +117,9 @@ const frame = try Attitude.pack(&buf, &value, timestamp_us);
 ## 构建
 
 ```bash
-zig build test           # 59 个单元测试
+zig build test           # 75 个单元测试
 zig build demo           # 主机虚拟时钟演示
-zig build check-targets  # 交叉编译 6 个目标
+zig build check-targets  # 交叉编译 7 个目标
 zig build ci             # 格式检查 + 测试 + 目标编译
 ```
 
@@ -171,6 +172,24 @@ pwsh tools/vendor.ps1 -Dest ../my-project/lib/breeze -Check
 | 主机（测试与仿真） | 任意 | ✅ 虚拟时钟后端 |
 | 8051 / MCS-51 | — | ❌ Zig 不支持该架构 |
 
+`zig build check-targets` 的七个具名目标与三款智能车芯片的对应关系：
+
+| 目标名 | 对应芯片 | 三元组 |
+|---|---|---|
+| `smartcar_cyt2bl3` | CYT2BL3 | `thumb-freestanding-eabihf` / `cortex_m4+vfp4d16sp` |
+| `smartcar_cyt4bb7_cm0p` | CYT4BB7 CM0+ | `thumb-freestanding-eabi` / `cortex_m0plus` |
+| `smartcar_cyt4bb7_cm7` | CYT4BB7 CM7 | `thumb-freestanding-eabihf` / `cortex_m7+fp_armv8d16sp` |
+| `smartcar_rt1064` | RT1064 | `thumb-freestanding-eabihf` / `cortex_m7+fp_armv8d16sp` |
+| `cortex_m0` / `cortex_m4` | 接线示例 | — |
+| `riscv32` | 接线示例 | — |
+
+RT1064 与 CYT4BB7 的 CM7 核三元组完全相同，因此二者共享同一份编译验证。
+之所以仍然单独列出 `smartcar_rt1064`，是为了让"RT1064 已验证"这句话**可以被审阅**——
+否则它依赖读者自己发现两块板恰好同三元组。
+
+以上是**交叉编译验证**：证明代码能为该目标编译通过。它不等于已在硬件上运行，
+真机验证情况见各模板仓库。
+
 ## 文档
 
 | 文档 | 内容 |
@@ -178,13 +197,14 @@ pwsh tools/vendor.ps1 -Dest ../my-project/lib/breeze -Check
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 设计决策、调度语义、中断规则、指令集、实测数据、迁移计划 |
 | [docs/FUSION.md](docs/FUSION.md) | 与 LibXR/XRobot 及 Smartcar-Template 的融合方案 |
 | [docs/LIBXR-XROBOT.md](docs/LIBXR-XROBOT.md) | LibXR/XRobot 技术调研（外部资料核对记录） |
+| [docs/REVIEW.md](docs/REVIEW.md) | 一次外部代码评审的逐条处理记录：采纳、驳回（附证据）、推迟 |
 
 示例代码：
 
 | 文件 | 用途 |
 |---|---|
 | `examples/scheduler_demo.zig` | 可运行的主机演示（`zig build demo`） |
-| `examples/firmware_smartcar.zig` | 四模块融合固件，三款智能车芯片编译验证 |
+| `examples/firmware_smartcar.zig` | 四模块融合固件，三款智能车芯片各有具名编译验证目标 |
 | `examples/firmware_cortex_m.zig` | Cortex-M 接线示例，也是交叉编译检查 |
 | `examples/firmware_riscv.zig` | RISC-V 接线示例，同上 |
 

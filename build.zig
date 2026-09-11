@@ -40,9 +40,18 @@ pub fn build(b: *std.Build) void {
     // they are compiled for their own architectures rather than for the host.
     // This step is what keeps the target backends honest in CI.
     //
-    // The CPU/ABI triples below are not arbitrary: the `smartcar_*` entries are
-    // exactly the ones the Smartcar-Template Makefiles use for CYT2BL3,
-    // CYT4BB7 and RT1064, so a change that breaks those boards fails here.
+    // The CPU/ABI triples below are not arbitrary: they are exactly the ones
+    // the Smartcar-Template Makefiles use, so a change that breaks one of
+    // those boards fails here. Compare them with `ZIG_TARGET` / `ZIG_CPU` in
+    // `templates/base/<chip>/Makefile` of that repository.
+    //
+    // `smartcar_rt1064` duplicates `smartcar_cyt4bb7_cm7`'s triple, because
+    // RT1064 and the CYT4BB7 CM7 core are both `cortex_m7+fp_armv8d16sp`.
+    // Listing it separately costs one more object compile and buys something
+    // worth more: the claim "RT1064 is compile-verified" becomes checkable by
+    // reading the step's output, instead of resting on the reader noticing
+    // that two boards happen to share a triple. Coverage by coincidence is
+    // coverage nobody can audit.
     const check_step = b.step("check-targets", "Compile the firmware skeletons for Cortex-M and RISC-V");
 
     const freestanding_targets = [_]struct {
@@ -104,6 +113,18 @@ pub fn build(b: *std.Build) void {
         },
         .{
             .name = "smartcar_cyt4bb7_cm7",
+            .example = "examples/firmware_smartcar.zig",
+            .query = .{
+                .cpu_arch = .thumb,
+                .os_tag = .freestanding,
+                .abi = .eabihf,
+                .cpu_model = .{ .explicit = &std.Target.arm.cpu.cortex_m7 },
+                .cpu_features_add = std.Target.arm.featureSet(&.{.fp_armv8d16sp}),
+            },
+        },
+        .{
+            // Same triple as the entry above; see the comment on check_step.
+            .name = "smartcar_rt1064",
             .example = "examples/firmware_smartcar.zig",
             .query = .{
                 .cpu_arch = .thumb,

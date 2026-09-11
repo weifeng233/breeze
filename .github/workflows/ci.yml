@@ -1,0 +1,77 @@
+name: CI
+
+# `zig build ci` is the single gate: format check, unit tests and the
+# freestanding target compiles. It is the same command contributors run
+# locally, so a green local run and a green CI run mean the same thing.
+#
+# The Zig version is pinned deliberately. Breeze depends on comptime behaviour
+# that has moved between Zig releases - `@typeInfo` field shapes,
+# `std.builtin.Type` variants, `std.fs` entry points, the removal of
+# `std.io` - so an unpinned toolchain would turn a routine runner update into
+# an unexplained red build. The pin must match `minimum_zig_version` in
+# `build.zig.zon`; `.zigversion` carries the same value for the tooling that
+# reads it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: zig build ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned Zig version
+        id: zigver
+        run: echo "version=$(cat .zigversion)" >> "$GITHUB_OUTPUT"
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zigver.outputs.version }}
+
+      - name: Report the toolchain
+        run: zig version
+
+      - name: Format check, unit tests and target compiles
+        run: zig build ci
+
+      # The target list is a release claim in README.md ("7 targets"), so the
+      # job prints it and asserts the size. A silently shrinking list is how a
+      # target quietly stops being verified. The count is stable across cached
+      # and uncached runs: the summary names each object either way.
+      - name: Confirm every target was compiled
+        run: |
+          out=$(zig build check-targets --summary all 2>&1)
+          echo "$out"
+          count=$(printf '%s\n' "$out" | grep -c 'compile obj breeze_fw_')
+          echo "compiled $count firmware objects"
+          test "$count" -eq 7
+
+      # The numbers in README's status line drifted three separate times before
+      # anyone noticed (59/6, then 68/7 after new tests). Documentation that
+      # restates a measurement goes stale silently, so the claim is checked
+      # rather than trusted. ARCHITECTURE.md and FUSION.md deliberately no
+      # longer repeat these numbers; README is the single source.
+      - name: README's test count must match reality
+        run: |
+          actual=$(zig test src/breeze.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
+          claimed=$(grep -o '\*\*[0-9]* 个单元测试\*\*' README.md | head -1 | grep -o '[0-9]*')
+          echo "README claims: $claimed   actual: $actual"
+          test -n "$actual" || { echo "could not parse the test count"; exit 1; }
+          test -n "$claimed" || { echo "could not parse README's claim"; exit 1; }
+          test "$actual" = "$claimed"
+
+      - name: README's target count must match reality
+        run: |
+          actual=$(zig build check-targets --summary all 2>&1 | grep -c 'compile obj breeze_fw_')
+          claimed=$(grep -o '\*\*[0-9]* 个目标交叉编译\*\*' README.md | head -1 | grep -o '[0-9]*')
+          echo "README claims: $claimed   actual: $actual"
+          test -n "$claimed" || { echo "could not parse README's claim"; exit 1; }
+          test "$actual" = "$claimed"

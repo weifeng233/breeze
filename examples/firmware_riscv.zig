@@ -113,7 +113,10 @@ export fn breeze_main() callconv(.c) noreturn {
     hal.configure(.{
         .mtime_addr = 0x0200_BFF8,
         .mtimecmp_addr = 0x0200_4000,
-        .timer_hz = 32_768, // 1 ms period = 32.768 ticks, truncated to 32
+        // 32.768 cycles per millisecond. Not a whole number, so the period
+        // alternates between 32 and 33 to average exactly 1 ms; a fixed 32
+        // would run 2.34% fast. See `MillisecondGrid`.
+        .timer_hz = 32_768,
     });
     hal.init();
     uart_rx_ring.init(); // bind the ring's channel to its own buffer

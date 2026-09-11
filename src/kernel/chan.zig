@@ -69,8 +69,20 @@ pub fn Channel(comptime T: type, comptime capacity: usize) type {
         const mask: u32 = @intCast(slots - 1);
 
         backing: *[slots]T,
-        head: u32 = 0, // written by the producer only
-        tail: u32 = 0, // written by the consumer only
+        /// Written by the producer only, read by the consumer only.
+        ///
+        /// Both indices are stored **masked**, always in `0..slots`, so they
+        /// never approach the u32 wrap even after months of traffic. That is
+        /// why the extreme-index case needs no special handling: `head +% 1`
+        /// cannot overflow a value bounded by `mask`, which is at most `2^31-1`.
+        ///
+        /// Both are also shared - `head` is written by the ISR and read by the
+        /// task, `tail` the other way round - so every access to either goes
+        /// through `shared`, on both sides. Reading or writing one directly
+        /// would let the compiler cache it, which is what `shared.zig` exists
+        /// to prevent.
+        head: u32 = 0,
+        tail: u32 = 0,
 
         /// Bind a channel to caller-owned storage.
         pub fn init(storage: *[slots]T) Self {
@@ -84,7 +96,11 @@ pub fn Channel(comptime T: type, comptime capacity: usize) type {
         /// on the caller's behalf.
         pub fn pushFromIsr(self: *Self, value: T) bool {
             const next = (self.head +% 1) & mask;
-            if (next == (self.tail & mask)) return false;
+            // `tail` is written by the consumer and read here, so it is shared
+            // state too - not only `head`. Reading it directly would let the
+            // compiler cache it, and a producer that keeps seeing a stale tail
+            // reports "full" for ever. See the note on `tail` below.
+            if (next == (shared.load(u32, &self.tail) & mask)) return false;
             self.backing[self.head & mask] = value;
             // Publish the element before the index that reveals it.
             shared.store(u32, &self.head, next);
@@ -96,7 +112,7 @@ pub fn Channel(comptime T: type, comptime capacity: usize) type {
             const tail = self.tail & mask;
             if (tail == shared.load(u32, &self.head)) return null;
             const value = self.backing[tail];
-            self.tail = (self.tail +% 1) & mask;
+            shared.store(u32, &self.tail, (self.tail +% 1) & mask);
             return value;
         }
 
@@ -128,7 +144,7 @@ pub fn Channel(comptime T: type, comptime capacity: usize) type {
         /// Discard everything. Task context only, and only while the producer
         /// is known to be idle (otherwise it races the ISR).
         pub fn reset(self: *Self) void {
-            self.tail = shared.load(u32, &self.head);
+            shared.store(u32, &self.tail, shared.load(u32, &self.head));
         }
 
         /// Drain into a caller slice, returning how many were taken.
@@ -194,6 +210,8 @@ const Fixture = struct {
     var buf7: [8]u8 = undefined;
     var buf4: [4]u16 = undefined;
     var counted: [8]u8 = undefined;
+    /// 1023 usable slots; see the masked-index test for why that size.
+    var big: [1024]u16 = undefined;
 };
 
 test "channel starts empty and accepts up to capacity" {
@@ -261,6 +279,74 @@ test "channel works for non-byte payloads" {
     try std.testing.expectEqual(@as(u16, 0x1234), ch.pop().?);
     try std.testing.expectEqual(@as(u16, 0xABCD), ch.pop().?);
     try std.testing.expectEqual(@as(u16, 0x0001), ch.pop().?);
+}
+
+test "indices stay masked, so the u32 wrap is unreachable" {
+    // The reviewer's question was whether extreme head/tail values break the
+    // index arithmetic. They cannot, because both indices are stored masked and
+    // therefore live in `0..slots`. This test drives a very long run through a
+    // deliberately awkward capacity - the wrap point of the ring, not of u32 -
+    // and asserts the invariant on every single step.
+    //
+    // 1023 usable slots means the indices cycle every 1024 pushes, so 100k
+    // pushes cross the ring wrap ~97 times without ever approaching 2^32.
+    const Cap = 1023;
+    var ch = Channel(u16, Cap).init(&Fixture.big);
+
+    var pushed: u32 = 0;
+    var popped: u32 = 0;
+    var expected: u16 = 0;
+
+    while (pushed < 100_000) {
+        // Keep the ring roughly half full so both push and pop take turns.
+        if (ch.count() < Cap / 2) {
+            try std.testing.expect(ch.pushFromIsr(expected));
+            expected +%= 1;
+            pushed += 1;
+        } else {
+            const got = ch.pop().?;
+            try std.testing.expectEqual(@as(u16, @truncate(popped)), got);
+            popped += 1;
+        }
+
+        // The invariant: neither index has left the masked range.
+        try std.testing.expect(ch.head <= Cap);
+        try std.testing.expect(ch.tail <= Cap);
+        // And the occupancy reading stays consistent with the two indices.
+        try std.testing.expect(ch.count() <= Cap);
+    }
+}
+
+test "the producer reads the consumer's tail through the shared accessor" {
+    // `tail` is written by the consumer and read by the producer, so it is
+    // shared state in both directions - the same rule that applies to `head`.
+    // A cached `tail` in the producer would report "full" for ever. This test
+    // exercises the interleaving that would expose it: the consumer drains
+    // while the producer keeps pushing, always to the same ring position.
+    var ch = ByteChannel(7).init(&Fixture.buf7);
+
+    var round: u32 = 0;
+    while (round < 1000) : (round += 1) {
+        // Fill.
+        var i: u32 = 0;
+        while (i < 7) : (i += 1) {
+            try std.testing.expect(ch.pushFromIsr(@truncate(i + round)));
+        }
+        // The eighth must be refused, and must stay refused while full.
+        try std.testing.expect(!ch.pushFromIsr(0xFF));
+
+        // Drain one: the producer must now see room again immediately.
+        _ = ch.pop();
+        try std.testing.expect(ch.pushFromIsr(0xEE));
+
+        // Drain the rest.
+        i = 0;
+        while (i < 7) : (i += 1) {
+            try std.testing.expect(ch.pop() != null);
+        }
+        try std.testing.expect(ch.pop() == null);
+        try std.testing.expect(ch.isEmpty());
+    }
 }
 
 test "peek does not consume" {
