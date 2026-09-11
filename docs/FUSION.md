@@ -293,7 +293,7 @@ pub const BoardHal = struct {
 | 阶段 | 内容 | 验收 | 状态 |
 |---|---|---|---|
 | **S0** | 把 Breeze 作为 `project/zig/breeze/` 引入 cyt2bl3，替换 scheduler | 现有 LED/串口示例行为不变；RAM 下降可量化 | ✅ **已完成**，见 §7.5 |
-| **S1** | 用 `App` 重写 cyt2bl3 示例为 3 个模块 | 编译通过；`App.describe()` 输出正确模块图 | 待做 |
+| **S1** | 用 `App` 重写 cyt2bl3 示例为 3 个模块 | 编译通过；`App.describe()` 输出正确模块图 | ✅ **已完成**，见 §7.8 |
 | **S2** | 补 cyt4bb7 / rt1064 的 HAL 与 Zig 驱动层 | 三芯片 Zig 路径对称 | 待做 |
 | **S3** | 遥测：接一个 topic 到串口，上位机用 LibXR 帧格式解析 | 上位机能看到实时曲线 | 待做 |
 | **S4** | 把 XRobot 式模块清单导出为文档，供学生阅读 | 生成 README 中的模块表 | 待做 |
@@ -310,8 +310,11 @@ pub const BoardHal = struct {
 | 整机 Flash | 153 952 B | 153 776 B | −176 B |
 | Zig 对象中的 `wfi` | 0 处 | 2 处 | 空闲不再忙等 |
 
-Flash 那一列对 Breeze 偏保守：它还额外带了两个诊断导出（`zig_worst_lateness`、
-`zig_grid_resyncs`），原版本没有对应功能。
+Flash 那一列对 Breeze 偏保守，但只在**对象文件**那一行：Breeze 还额外带了两个诊断导出
+（`zig_worst_lateness`、`zig_grid_resyncs`），原版本没有对应功能。整机那一行不受影响——
+S1 期间实测确认，链接脚本只 `KEEP` 了 `.intvec` / `.init` / `.fini`，这两个无人调用的
+导出会被 `--gc-sections` 回收，最终镜像里根本不存在（用 `zig objdump` 与二进制串搜索
+都查不到）。这条已在 §7.9 一并记录。
 
 原调度器占的 400 B 就是 `[16]?Task` 常驻数组。Breeze 三个任务的调度状态名义上是 84 B
 （`TaskState` 24 B × 3 + 事件标志 4 + 两个计数器 8），实际只发出 72 B，
@@ -343,6 +346,98 @@ Breeze 侧新增 `tools/vendor.ps1`：把内核复制进任意仓库，并写出
 有一个 Zig 行为值得记下：**`test` 块里的 `@import` 在 `build-obj` 时也会被解析**。
 内核的几个文件在测试夹具里 import `../hal/host.zig`，所以 vendor 时必须把它一起带上，
 否则被 vendor 的树无法编译。这条是用"故意 import 一个不存在的文件"实测确认的。
+
+### 7.8 S1 实测结果
+
+分支 `feat/app-modules-s1`。三个任务改写成 `modules/{blink,status,telemetry}.zig`，
+装配表变成 `app.zig` 里的一份 `AppWithHardware` 声明。
+
+**模块图**（编译期算好，`describe()` 打出来的字面就是这些）：
+
+```
+application: 3 module(s)
+  [0] blink0 (Blink)  period=200ms
+        Toggles the status LED and counts every edge
+        hardware: led
+        provides: blink
+  [1] status0 (Status)  period=1000ms
+        Prints a one-line link report once a second
+        depends: blink
+        hardware: uart0
+        publishes: status
+  [2] telemetry0 (Telemetry)  period=100ms
+        Emits a sample frame for the host to plot
+        hardware: uart0
+        publishes: telemetry
+```
+
+**整机占用**（`-OReleaseSmall`，用新增的 `tools/elfsize.ps1` 按 section 统计）：
+
+| | S0（手写任务表） | S1（`describe` 关） | S1（`describe` 开） |
+|---|---|---|---|
+| `.text` | — | 145 040 | 147 312 |
+| `.bss` | 3 288 | 3 296 | 3 296 |
+| Flash 合计 | 153 952 | **152 128** | 154 400 |
+| BIN | 153 952 | 153 792 | 156 064 |
+
+两个结论：
+
+1. **换成模块化装配本身不增加开销**，反而比 S0 少 160 B。`Blink` 的边沿计数占 4 B，
+   但省掉了任务表里冗余的东西。
+2. **开机打印模块图值约 2.3 KB flash**（`.text` 增量 147 312 − 145 040 = 2 272 B，
+   全部来自 `std.fmt` 的整数格式化）。对一颗 152 KB 的镜像这不是小数目，因此
+   `app.zig` 里留了 `print_manifest_at_boot` 开关。它是 `comptime` 分支，关掉时
+   那段代码**根本不会被分析**，代价是精确的零而不是"很小"。默认开启，因为教学价值
+   高于 2.3 KB。
+
+**主机测试**：`zig test project/zig/app_test.zig` → **69 passed**。其中 8 个是 S1 新写的，
+跑的是**固件同一份模块代码**——模块把 I/O 面作为 comptime 类型参数接收，换成 `FakeIo`
+就能在主机上执行。验证内容包括：三者的实际激活次数（5 / 1 / 10）、`describe()` 的逐行
+输出、以及"依赖确实在传数据"——`Status` 在 t=0 那一轮读到 `Blink` 刚产生的第 1 个边沿，
+证明 `Config` 里那个指针不是装饰。
+
+这也正是 Breeze 相对 XRobot 的关键差别：XRobot 需要一份 YAML 加一个 Python 生成器才能
+拿到模块图，Breeze 的模块图就是源码，而且能在主机上直接跑。
+
+### 7.9 S1 暴露的框架缺口
+
+`App` 原有的 `coerceConfig` 无法表达"必填的 Config 字段"：它用 `var cfg: Config = .{}`
+构造，于是每个字段都必须有默认值。而 `Status` 恰恰需要一个没有默认值的
+`blink: *Blink.State` 来把接线变成编译期强制。
+
+已改为 `undefined` 构造 + 显式检查无默认值字段，漏填时给出点名报错：
+
+```
+Status.Config field 'blink' is required and was not set in the instance's `config` literal
+```
+
+这是 S1 第一次真正使用 `App` 才发现的缺口——之前 `app.zig` 的测试全都用带默认值的
+Config，覆盖不到。Breeze 侧补了两个测试锁住它。
+
+另一个改动在模板侧：`$(ZIG_OUT)` 原来只依赖 `project/zig/*.zig`，看不到新加的
+`modules/` 子目录，改了模块不会触发重新编译、固件会静默保留旧代码。三个 Makefile
+都已改成 `project/zig/*.zig project/zig/*/*.zig`。
+
+### 7.10 `--gc-sections` 会吃掉无调用者的导出
+
+S1 验证镜像内容时发现的：`zig_worst_lateness` 和 `zig_grid_resyncs` 是 `pub export fn`，
+但没有任何 C 侧代码调用它们，于是链接时被回收，镜像里既没有符号也没有代码。
+
+这修正了 §7.5 的一处不准确表述。它和 S0 记录过的 `breeze_board_wfi` 是同一个现象，
+但方向相反，值得一起记住：
+
+* **`export fn` 保证被汇编**——Zig 的惰性分析不会跳过它，所以内联汇编里的笔误能在
+  编译期暴露。这是 S0 用 `export` 替换 `comptime { _ = &f; }` 的原因。
+* **`export fn` 不保证进镜像**——只要没人调用、链接脚本又没 `KEEP`，它就只是一段
+  被丢弃的死代码。
+
+所以"想确认某段代码真的被编译过"用 `export`，"想确认它真的在固件里"必须查最终镜像。
+这两件事不能互相替代。
+
+顺带记下另一个字符串相关的坑：`describe()` 的输出在镜像里是**碎片化**的，
+`depends:` 与 ` blink` 分属格式串和 manifest 数组，并不连续。想从二进制里确认
+模块图在不在，要么搜各个片段，要么直接信主机测试对**渲染结果**的断言——后者才是
+权威检查。
 
 ---
 

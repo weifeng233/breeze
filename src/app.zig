@@ -370,6 +370,12 @@ fn instanceNameOf(comptime decl: anytype) []const u8 {
 /// omitted, and - because the loop is `inline` over the declared fields - lets
 /// a typo in the call site be a compile error rather than a silently ignored
 /// setting.
+///
+/// A field with no default is *required*: omitting it is a compile error naming
+/// the field. That is how a module forces its dependency wiring, e.g.
+/// `status.zig`'s `blink: *Blink.State`. The struct is therefore built into
+/// `undefined` rather than `.{ }`, which would only work if every field had a
+/// default.
 fn coerceConfig(comptime Config: type, comptime supplied: anytype, comptime who: []const u8) Config {
     const Supplied = @TypeOf(supplied);
 
@@ -397,12 +403,31 @@ fn coerceConfig(comptime Config: type, comptime supplied: anytype, comptime who:
                 ));
             }
         }
+
+        // A field with no default and no supplied value is a wiring mistake,
+        // and it is worth catching here rather than letting it become an
+        // `undefined` read at runtime.
+        for (decl_fields) |d| {
+            if (!@hasField(Supplied, d.name) and d.defaultValue() == null) {
+                @compileError(std.fmt.comptimePrint(
+                    "{s}.Config field '{s}' is required and was not set in the instance's " ++
+                        "`config` literal",
+                    .{ who, d.name },
+                ));
+            }
+        }
     }
 
-    var cfg: Config = .{};
+    var cfg: Config = undefined;
     inline for (@typeInfo(Config).@"struct".fields) |f| {
         if (@hasField(Supplied, f.name)) {
             @field(cfg, f.name) = @field(supplied, f.name);
+        } else if (comptime f.defaultValue()) |dv| {
+            @field(cfg, f.name) = dv;
+        } else {
+            // Unreachable: the comptime block above rejects this case with a
+            // better message. Kept so the function is total.
+            @compileError(who ++ ".Config field '" ++ f.name ++ "' has no value");
         }
     }
     return cfg;
@@ -626,4 +651,77 @@ test "describe renders the module graph" {
 
 test "stack hint sums across modules" {
     try std.testing.expectEqual(@as(u32, 0), TestApp.stackHint());
+}
+
+/// A module whose `Config` has a field with no default.
+///
+/// This is how a module forces the application to wire something into it - the
+/// pattern `status.zig` in the Smartcar template uses to make its manifest
+/// dependency real rather than decorative.
+const FakeConsumer = struct {
+    pub const manifest = Manifest{
+        .name = "FakeConsumer",
+        .description = "Config with a required field",
+        .period_ms = 30,
+    };
+
+    pub const State = struct { wired: u32 = 0 };
+
+    pub const Config = struct {
+        /// No default, so an instance that omits it must not compile.
+        source: *u32,
+        /// Has a default, so this one may be omitted.
+        scale: u32 = 1,
+    };
+
+    pub fn init(self: *State, cfg: Config) void {
+        self.wired = cfg.source.* * cfg.scale;
+    }
+
+    pub fn poll(self: *State, now: Tick, events: u32) Step {
+        _ = .{ self, now, events };
+        return .finished;
+    }
+};
+
+// `App` takes its declaration list at comptime, so a module's `state` pointer
+// has to be a comptime-known address - which in practice means a file-scope
+// `var`, never a local. The tests below respect that.
+var consumer_state: FakeConsumer.State = .{};
+var consumer_source: u32 = 7;
+
+test "a Config field without a default can be supplied and defaults still apply" {
+    consumer_source = 7;
+    consumer_state = .{};
+
+    const A = App(.{
+        .{ .module = FakeConsumer, .state = &consumer_state, .config = .{ .source = &consumer_source } },
+    });
+    A.initAll();
+
+    // `scale` was omitted and took its default of 1.
+    try std.testing.expectEqual(@as(u32, 7), consumer_state.wired);
+
+    // And a supplied value still wins over the default.
+    consumer_state = .{};
+    const B = App(.{
+        .{ .module = FakeConsumer, .state = &consumer_state, .config = .{ .source = &consumer_source, .scale = 3 } },
+    });
+    B.initAll();
+    try std.testing.expectEqual(@as(u32, 21), consumer_state.wired);
+}
+
+test "an app can declare the hardware its modules require" {
+    // `AppWithHardware` rather than `App`, so the hardware list and its
+    // accessor are covered. No module here needs a peripheral, which is the
+    // degenerate case, but the declaration is still checked and readable.
+    consumer_state = .{};
+
+    const WithHw = AppWithHardware(.{
+        .{ .module = FakeConsumer, .state = &consumer_state, .config = .{ .source = &consumer_source } },
+    }, &.{ "i2c0", "uart0" });
+
+    try std.testing.expectEqual(@as(usize, 2), WithHw.hardware_names.len);
+    try std.testing.expectEqualStrings("i2c0", WithHw.hardware_names[0]);
+    try std.testing.expectEqualStrings("uart0", WithHw.hardware_names[1]);
 }
