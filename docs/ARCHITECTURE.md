@@ -213,6 +213,31 @@ Zig 惰性分析：**未被引用的 `inline fn` 根本不会被汇编**。这�
 
 同样的道理适用于 HAL 后端里的任何内联汇编：**只有被导出或被实际调用的代码才算验证过**。
 
+注意链接器仍会回收它：`--gc-sections` 下，没有任何调用者的导出函数会从最终镜像里消失。
+所以"汇编被验证过"和"函数出现在固件里"是两件事。`board.zig`（见
+[FUSION.md](FUSION.md) §7）里 `breeze_board_wfi` 就是这样——它在对象文件里被汇编和校验，
+然后被链接器删掉，因为调度器调用的是 `BoardHal.idle`，而那条 `wfi` 已经内联进调度循环了。
+
+### `test` 块里的 `@import` 也会被解析
+
+Zig 在 `build-obj`（不是跑测试）时**也会解析 `test` 块中的 `@import`**。这一点是用
+"故意 import 一个不存在的文件"实测确认的：
+
+```zig
+pub fn value() u32 { return 7; }
+
+test "imports a file that does not exist" {
+    const missing = @import("does_not_exist.zig");
+    _ = missing;
+}
+```
+
+对上面的文件执行 `zig build-obj`，会报 `unable to load 'does_not_exist.zig'`。
+
+后果：内核的几个文件在测试夹具里 import `../hal/host.zig`，所以用 `tools/vendor.ps1`
+把内核复制到别的仓库时**必须把 `hal/host.zig` 一起带上**，否则被 vendor 的树无法编译——
+即使固件根本不会引用它。这在 S0 阶段实际踩到过，`VENDORED.md` 里也写了原因。
+
 ## 8. 算法层迁移计划
 
 现有 C 算法库（共 35 个头文件，其中 filter / control / image / math 27 个）**尚未迁移**。

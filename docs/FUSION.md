@@ -290,13 +290,59 @@ pub const BoardHal = struct {
 
 ### 7.4 分阶段
 
-| 阶段 | 内容 | 验收 |
+| 阶段 | 内容 | 验收 | 状态 |
+|---|---|---|---|
+| **S0** | 把 Breeze 作为 `project/zig/breeze/` 引入 cyt2bl3，替换 scheduler | 现有 LED/串口示例行为不变；RAM 下降可量化 | ✅ **已完成**，见 §7.5 |
+| **S1** | 用 `App` 重写 cyt2bl3 示例为 3 个模块 | 编译通过；`App.describe()` 输出正确模块图 | 待做 |
+| **S2** | 补 cyt4bb7 / rt1064 的 HAL 与 Zig 驱动层 | 三芯片 Zig 路径对称 | 待做 |
+| **S3** | 遥测：接一个 topic 到串口，上位机用 LibXR 帧格式解析 | 上位机能看到实时曲线 | 待做 |
+| **S4** | 把 XRobot 式模块清单导出为文档，供学生阅读 | 生成 README 中的模块表 | 待做 |
+
+### 7.5 S0 实测结果
+
+分支 `feat/breeze-kernel-s0`。同一份固件、同一组任务、`-OReleaseSmall`：
+
+| | 原槽位调度器 | Breeze | 变化 |
+|---|---|---|---|
+| Zig 对象 RAM | 404 B | **72 B** | −332 B（−82%） |
+| Zig 对象 Flash | 944 B | 811 B | −133 B |
+| 整机 `.bss` | 3624 B | **3288 B** | −336 B |
+| 整机 Flash | 153 952 B | 153 776 B | −176 B |
+| Zig 对象中的 `wfi` | 0 处 | 2 处 | 空闲不再忙等 |
+
+Flash 那一列对 Breeze 偏保守：它还额外带了两个诊断导出（`zig_worst_lateness`、
+`zig_grid_resyncs`），原版本没有对应功能。
+
+原调度器占的 400 B 就是 `[16]?Task` 常驻数组。Breeze 三个任务的调度状态名义上是 84 B
+（`TaskState` 24 B × 3 + 事件标志 4 + 两个计数器 8），实际只发出 72 B，
+因为 `TaskState.runs` 在固件里只写不读，被优化器删掉了（3 × 4 = 12 B，正好是差额）。
+
+**验证深度**：`scripts/build_zig.ps1` 出对象 → 完整 `make` 链接出
+`cyt2bl3.elf/.hex/.bin` → 最终镜像里有 `zig_setup`/`zig_loop`/`pit0_isr_callback`/
+`zig_millis`、没有 `global_scheduler`。
+
+**C 侧零改动**：`main_zig.c`、`zig_bridge.h`、`cm4_isr.c` 一行未动，
+导出契约完全不变。
+
+### 7.6 S0 过程中发现的模板既有问题
+
+都在改之前就存在，与本方案无关：
+
+| 问题 | 影响 | 处理 |
 |---|---|---|
-| **S0** | 把 Breeze 作为 `project/zig/breeze/` 引入 cyt2bl3，替换 scheduler | 现有 LED/串口示例行为不变；RAM 下降可量化 |
-| **S1** | 用 `App` 重写 cyt2bl3 示例为 3 个模块 | 编译通过；`App.describe()` 输出正确模块图 |
-| **S2** | 补 cyt4bb7 / rt1064 的 HAL 与 Zig 驱动层 | 三芯片 Zig 路径对称 |
-| **S3** | 遥测：接一个 topic 到串口，上位机用 LibXR 帧格式解析 | 上位机能看到实时曲线 |
-| **S4** | 把 XRobot 式模块清单导出为文档，供学生阅读 | 生成 README 中的模块表 |
+| `coremark_port.c` include 了不存在的 `main.h` | **整机无法链接**（`'main.h' file not found`） | 已修：改为 `coremark.h`（`ee_u32` 的真正来源，且 `-I../../../tools` 已在包含路径上） |
+| 同样的 include 缺陷存在于 cyt4bb7 / rt1064 的副本 | 那两颗芯片同样无法链接 | **未改**：本环境无法构建验证，只报告 |
+| `make` 试图重建 picolibc，但 `picolibc-src` 已被 commit ca13264 删除 | 无法重建；因为 `build_picolibc.ps1` 的 mtime 比预编译的 `libc.a` 新，每次都会触发 | 未改（属设计决策）；验证时用 `make -o <libc.a>` 绕过，纯净树同样失败，已确认与本次改动无关 |
+
+### 7.7 供后续复用的机制
+
+Breeze 侧新增 `tools/vendor.ps1`：把内核复制进任意仓库，并写出 `VENDORED.md`
+（记录来源 commit 与每个文件的 sha256）。`-Check` 模式检测两边是否漂移。
+这样 S2/S3 往另两颗芯片复制时不需要手工挑文件。
+
+有一个 Zig 行为值得记下：**`test` 块里的 `@import` 在 `build-obj` 时也会被解析**。
+内核的几个文件在测试夹具里 import `../hal/host.zig`，所以 vendor 时必须把它一起带上，
+否则被 vendor 的树无法编译。这条是用"故意 import 一个不存在的文件"实测确认的。
 
 ---
 

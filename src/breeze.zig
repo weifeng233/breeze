@@ -165,4 +165,7 @@ test {
     std.testing.refAllDecls(kernel.topic);
     std.testing.refAllDecls(app);
     std.testing.refAllDecls(hal.host);
+    // Pull in the kernel-only root so its re-exports stay valid, and so the file
+    // that `tools/vendor.ps1` ships is compiled on every test run.
+    _ = @import("breeze_kernel.zig");
 }

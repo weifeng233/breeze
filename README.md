@@ -124,6 +124,25 @@ zig build ci             # 格式检查 + 测试 + 目标编译
 
 交叉编译不需要额外安装工具链，`build.zig` 里已声明目标。
 
+### 把内核引入另一个仓库
+
+没有包管理器也能用。`tools/vendor.ps1` 把内核复制过去，并写出 `VENDORED.md`
+记录来源 commit 与每个文件的 sha256：
+
+```bash
+# 复制到目标树
+pwsh tools/vendor.ps1 -Dest ../my-project/lib/breeze
+# 之后检查两边有没有漂移
+pwsh tools/vendor.ps1 -Dest ../my-project/lib/breeze -Check
+```
+
+复制的是 `src/breeze_kernel.zig`（只含内核与 `app.zig`，不含平台后端），
+使用者自己提供 `now` / `criticalEnter` / `criticalExit` 三个函数。
+
+[Smartcar-Template](https://github.com/weifeng233/Smartcar-Template) 的 cyt2bl3 模板
+就是这样接入的，实测整机 RAM 从 404 B 降到 72 B；过程与数据见
+[docs/FUSION.md](docs/FUSION.md) §7。
+
 ## 实测开销
 
 在 Zig 0.16.0、`-OReleaseSmall` 下实测。复现命令见
