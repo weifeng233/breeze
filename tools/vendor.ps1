@@ -61,9 +61,43 @@ $halFiles = @(
 $rootFile = 'src/breeze_kernel.zig'
 $appFile = 'src/app.zig'
 
+# Read a file with its line endings normalised to LF.
+#
+# Why this is not just `ReadAllBytes`: git with `core.autocrlf=true` - the
+# default for Git for Windows - rewrites text files to CRLF when it checks them
+# out. So a vendored copy that was committed and later re-checked-out comes back
+# with CRLF while this repository still has LF, and a raw byte comparison then
+# reports drift for *every* file even though the content is identical.
+#
+# That failure mode is worse than having no check at all: a check that always
+# cries wolf trains the reader to ignore it, and the one time it reports real
+# drift it gets dismissed. Normalising means the comparison is about content,
+# which is what actually matters for a source copy.
+function Get-NormalizedBytes {
+    param([string] $Path)
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $out = [System.Collections.Generic.List[byte]]::new($bytes.Length)
+    for ($i = 0; $i -lt $bytes.Length; $i++) {
+        # Drop the CR of a CRLF pair; a lone CR is left alone.
+        if ($bytes[$i] -eq 13 -and ($i + 1) -lt $bytes.Length -and $bytes[$i + 1] -eq 10) {
+            continue
+        }
+        $out.Add($bytes[$i])
+    }
+    return $out.ToArray()
+}
+
 function Get-FileHashHex {
     param([string] $Path)
-    (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash((Get-NormalizedBytes $Path))
+        return ([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
 }
 
 # --- describe the source tree ----------------------------------------------
@@ -141,7 +175,10 @@ New-Item -ItemType Directory -Force -Path $Dest, $kernelDir | Out-Null
 foreach ($e in $entries) {
     $target = Join-Path $Dest $e.Dest
     New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
-    Copy-Item -Force $e.Full $target
+    # Written with LF explicitly rather than via Copy-Item, so the copy matches
+    # the source on every platform instead of inheriting whatever the host's
+    # git eol setting produces.
+    [System.IO.File]::WriteAllBytes($target, (Get-NormalizedBytes $e.Full))
 }
 
 # --- provenance -------------------------------------------------------------
@@ -181,6 +218,10 @@ foreach ($e in $entries) {
     $hash = (Get-FileHashHex $e.Full).Substring(0, 16)
     $lines.Add("| ``$($e.Dest)`` | ``$hash`` |")
 }
+$lines.Add('')
+$lines.Add('Hashes are of the content with CRLF normalised to LF, and the copies are')
+$lines.Add('written with LF, so the comparison is unaffected by the host''s git')
+$lines.Add('`core.autocrlf` setting. See the comment on `Get-NormalizedBytes`.')
 $lines.Add('')
 $lines.Add('## Not vendored, on purpose')
 $lines.Add('')
