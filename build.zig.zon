@@ -1,0 +1,14 @@
+.{
+    .name = .breeze,
+    .version = "0.1.0",
+    .fingerprint = 0xdd00b60c20071241,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "docs",
+        "examples",
+    },
+}

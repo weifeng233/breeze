@@ -1,0 +1,150 @@
+## Breeze Framework
+
+面向 **ARM Cortex-M** 与 **RISC-V** 裸机目标的确定性协作式任务内核，用现代 Zig 编写。
+同一份内核可以在主机上用虚拟时钟运行，因此固件逻辑能在工作站上被精确断言。
+
+> **状态**：内核 + 模块系统已完成，**59 个单元测试 + 7 个目标交叉编译**全部通过
+> （含智能车竞赛的 CYT2BL3 / CYT4BB7 / RT1064 三款芯片）。
+> C 版本的算法库仍保留在 `include/`、`src/` 中，作为算法层迁移的参考，见
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 第 8 节。
+
+### 设计要点
+
+- **确定性**：非抢占、无上下文切换、无堆、无动态任务。任务按声明顺序执行，时序可静态推理。
+- **零栈任务**：每个任务没有独立栈，共用主栈。状态机状态仅 12 字节，与指令条数无关。
+- **comptime 任务表**：`inline for` 把任务表展开为直接调用，没有函数指针间接跳转，RAM 中也没有任务表。
+- **comptime 状态机**：顺序逻辑（发送 → 等待 → 超时 → 重试 → 放弃）写成编译期指令表，
+  编译器生成状态与跳转表，没有手写 `switch`，也没有 `__LINE__` 宏技巧。
+- **三个函数的 HAL**：`now` / `criticalEnter` / `criticalExit`，作为 comptime 类型参数传入，
+  零虚表开销。主机与目标共用同一份调度器代码。
+- **编译期模块组合**：模块用 `Manifest` 声明依赖与外设需求，`App` 在编译期校验——
+  缺失的依赖、重复的提供者、拼错的配置字段都会直接编译失败，没有 YAML、没有代码生成步骤。
+- **无锁 IPC**：`Channel` 是调用者提供存储的 SPSC 环，`Topic` 是编译期主题 +
+  与 LibXR 兼容的遥测帧格式，两者都不分配、不加锁。
+
+### 快速开始
+
+```zig
+const breeze = @import("breeze");
+const hal = breeze.hal.host;
+
+const Control = struct { ticks: u32 = 0 };
+
+fn poll(ctx: *Control, now: breeze.Tick, events: u32) breeze.Step {
+    _ = .{ now, events };
+    ctx.ticks += 1;
+    return .finished;
+}
+
+var control = Control{};   // 任务上下文必须是静态的
+
+const Sched = breeze.Scheduler(hal.HostHal, .{
+    .{ .name = "control", .period_ms = 20, .ctx = &control, .poll = poll },
+});
+
+pub fn main() void {
+    var sched = Sched.init();
+    hal.HostHal.runFor(&sched, 1000);   // 虚拟时间，不 sleep
+    // control.ticks == 50
+}
+```
+
+顺序逻辑用编译期指令表表达：
+
+```zig
+const instrs = [_]breeze.Instr(Handshake){
+    .{ .call = sendRequest },
+    .{ .wait_event_timeout = .{ .mask = EVT_ACK, .timeout_ms = 50 } },
+    .{ .branch_event = 6 },                    // 收到 ACK → 成功分支
+    .{ .branch_if = .{ .pred = mayRetry, .target = 0 } },
+    .{ .call = onGiveUp },
+    .{ .jump = 7 },
+    .{ .call = onSuccess },
+    .finish,
+};
+```
+
+### 模块组合
+
+模块用 `Manifest` 声明自己需要什么、提供什么、多久跑一次：
+
+```zig
+const Imu = struct {
+    pub const manifest = breeze.Manifest{
+        .name = "Imu",
+        .hardware = &.{"i2c0"},          // 外设：由应用声明
+        .publishes = &.{"attitude"},
+        .period_ms = 5,                  // 200 Hz
+    };
+    pub const Config = struct { alpha: f32 = 0.2 };
+    pub const State = struct { attitude: Attitude.Value = .{} };
+
+    pub fn init(self: *State, cfg: Config) void { ... }
+    pub fn poll(self: *State, now: Tick, events: u32) Step { ... }
+};
+```
+
+然后在应用里组装——**依赖检查全部在编译期完成**：
+
+```zig
+const App = breeze.AppWithHardware(.{
+    .{ .module = Imu,     .state = &imu_state,     .config = .{ .alpha = 0.3 } },
+    .{ .module = Chassis, .state = &chassis_state, .config = .{ .counts_per_meter = 1850.0 } },
+}, &.{ "i2c0", "uart0", "motor_l", "motor_r" });
+
+const Sched = App.SchedulerFor(BoardHal);
+```
+
+`depends` 与 `hardware` 是两条独立的线：前者检查"有没有别的模块提供"，
+后者检查"应用有没有声明这个外设"。把外设包装成假模块只为通过检查是没有意义的。
+
+### 遥测
+
+`Topic` 在编译期把名字折成 CRC32，帧格式与 LibXR 兼容，现有上位机工具可直接解析：
+
+```zig
+const Attitude = breeze.Topic("attitude", extern struct { roll: f32, pitch: f32, yaw: f32 });
+
+var buf: [64]u8 = undefined;
+const frame = try Attitude.pack(&buf, &value, timestamp_us);
+```
+
+### 构建
+
+```bash
+zig build test           # 59 个单元测试
+zig build demo           # 主机虚拟时钟演示
+zig build check-targets  # 交叉编译 7 个目标（含三款智能车芯片）
+zig build ci             # 格式检查 + 测试 + 目标编译
+```
+
+交叉编译不需要额外安装工具链。
+
+### 实测开销
+
+| 项 | 大小 |
+|---|---|
+| `Program` 状态 | 12 字节（与指令条数无关） |
+| `TaskState` | 24 字节 |
+| 每任务额外栈 | 0 |
+| 内核 + 2 任务固件（Cortex-M0） | 600 B flash / 60 B RAM |
+| 4 模块融合固件（CYT2BL3，含遥测） | 1434 B flash / 280 B RAM |
+| 调度抖动 | 0 tick |
+
+### 目标平台支持
+
+| 架构 | 目标 | 状态 |
+|---|---|---|
+| ARM Cortex-M0/M0+/M3/M4/M7 | `thumb-freestanding[-eabihf]` | ✅ 已编译验证 |
+| RISC-V RV32/RV64 | `riscv32-freestanding` / `riscv64-freestanding` | ✅ 已编译验证 |
+| 主机（测试与仿真） | 任意 | ✅ 虚拟时钟后端 |
+| 8051 | — | ❌ Zig 不支持该架构 |
+
+### 文档
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 设计决策、调度语义、中断规则、指令集、实测数据
+- [docs/FUSION.md](docs/FUSION.md) — 与 LibXR/XRobot 及 Smartcar-Template 的融合方案
+- [docs/LibXR-XRobot-technical-report.md](docs/LibXR-XRobot-technical-report.md) — LibXR/XRobot 技术调研
+- `examples/scheduler_demo.zig` — 可运行的主机演示
+- `examples/firmware_smartcar.zig` — 四模块融合固件（三款智能车芯片编译验证）
+- `examples/firmware_cortex_m.zig` / `examples/firmware_riscv.zig` — 目标平台接线示例
