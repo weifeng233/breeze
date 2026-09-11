@@ -31,6 +31,23 @@
 //! level-triggered repeat and the fact that clearing one flag does not disturb
 //! another raised in the same pass.
 //!
+//! # Why not auto-clear, or edge semantics
+//!
+//! This was considered and rejected, so the reasoning is recorded rather than
+//! left to be re-litigated:
+//!
+//! * Auto-clearing would make two tasks that care about the same flag race -
+//!   whichever runs first consumes it and the other never sees it. Under the
+//!   level rule both observe it, which is the property a cooperative scheduler
+//!   with declaration-order execution actually wants.
+//! * Edge semantics needs a count or a sequence number to avoid losing events
+//!   that arrive between passes. That stops being one word with no allocation,
+//!   and `Channel` already covers it - with storage, and with drop counting.
+//!   The split between the two is deliberate.
+//!
+//! The cost is that callers must remember to clear. That is made explicit here
+//! and guaranteed by tests rather than left as folklore.
+//!
 //! # Every access goes through `shared` (volatile)
 //!
 //! `bits` is written by an interrupt handler and read by the scheduler, so it
