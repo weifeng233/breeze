@@ -1,0 +1,35 @@
+# --- Zig build artifacts ---------------------------------------------------
+.zig-cache/
+.zig-cache-global/
+.zig-cache-local/
+zig-cache/
+zig-out/
+
+# Scratch directories used while probing toolchain behaviour. Named explicitly
+# so that a stray one can never be committed by accident.
+.measure/
+.probe/
+.scratch*/
+.tmpl-*/
+
+# --- C build artifacts -----------------------------------------------------
+*.o
+*.obj
+*.a
+*.lib
+*.exe
+*.out
+*.elf
+*.bin
+*.hex
+*.map
+*.su
+*.d
+
+# --- Editor / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

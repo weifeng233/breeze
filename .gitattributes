@@ -1,0 +1,29 @@
+# Line endings are pinned rather than inherited from each developer's
+# core.autocrlf setting, so a checkout on Windows and a clone on Linux produce
+# byte-identical trees. This matters here because the C sources are compiled by
+# `zig cc` on Windows and the Zig sources by `zig build` anywhere.
+* text=auto eol=lf
+
+# Windows shell scripts are read by powershell.exe / cmd.exe; keep CRLF so
+# they behave the same when checked out on a machine without autocrlf.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binaries: never touch, never diff.
+*.exe   binary
+*.o     binary
+*.obj   binary
+*.a     binary
+*.lib   binary
+*.elf   binary
+*.bin   binary
+*.hex   binary
+*.zip   binary
+*.png   binary
+*.jpg   binary
+
+# Build output should not appear in diffs or language statistics.
+.zig-cache-local/**  export-ignore
+.zig-cache-global/** export-ignore
+zig-out/**           export-ignore
