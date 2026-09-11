@@ -116,6 +116,7 @@ export fn breeze_main() callconv(.c) noreturn {
         .timer_hz = 32_768, // 1 ms period = 32.768 ticks, truncated to 32
     });
     hal.init();
+    uart_rx_ring.init(); // bind the ring's channel to its own buffer
 
     // Point mtvec at the table (direct mode) and unmask the sources used.
     const table_addr: usize = @intFromPtr(&trap_vector_table);

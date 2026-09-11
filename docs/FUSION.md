@@ -3,8 +3,10 @@
 > 本文档回答一个问题：把 XRobot/LibXR 的设计经验、Breeze 的确定性内核、以及
 > Smartcar-Template 的生成器工作流结合成一个方案，应该长什么样。
 >
+> 相关文档：[ARCHITECTURE.md](ARCHITECTURE.md)（内核设计）· [LIBXR-XROBOT.md](LIBXR-XROBOT.md)（调研记录）
+>
 > 文中所有"实测"结论都是在 Zig 0.16.0 + 本机复现的，不是推断。XRobot/LibXR 的事实来自
-> `docs/LibXR-XRobot-technical-report.md`（对官方文档与 Doxygen 源码浏览器逐页核对）。
+> [LIBXR-XROBOT.md](LIBXR-XROBOT.md)（对官方文档与 Doxygen 源码浏览器逐页核对）。
 
 ---
 
@@ -16,12 +18,15 @@
 | 语言 | Zig（freestanding） | C++20，必须编译 | C 或 Zig（`zig cc`） |
 | 调度 | comptime 任务表 + 周期栅格 | **无自己的抢占调度**（`MonitorAll` 是 1000ms 监督循环） | cyt2bl3 有槽位调度器；另两芯片没有 |
 | 内存 | 零堆、零任务栈 | 运行期 `SPSCQueue`/`Callback::Create` 会堆分配 | 无约束 |
-| 规模 | 内核 600 B flash / 60 B RAM（实测） | 完整框架 | 完整 SDK + 逐飞库 |
-| 许可 | 待定 | Apache-2.0 | GPL-3.0（逐飞库约束） |
+| 规模 | 融合固件 1434 B flash / 280 B RAM（实测） | 完整框架 | 完整 SDK + 逐飞库 |
+| 许可 | **MIT** | Apache-2.0 | GPL-3.0（逐飞库约束） |
 | 目标 | Cortex-M / RISC-V | STM32/ESP32/HPM/CH32/MSPM0/Linux/… | CYT2BL3 / CYT4BB7 / RT1064 |
 
 **三者不是竞争关系。** LibXR 解决"模块怎么组织和复用"，Breeze 解决"时间怎么确定性分配"，
 Smartcar-Template 解决"工程怎么生成到学生手里"。三者恰好互补。
+
+许可上需要注意：Breeze 采用 MIT，而逐飞库是 GPL-3.0。**把 Breeze 源码直接放进
+Smartcar-Template 生成的工程里分发，需要按 GPL 兼容方式处理**，见 §9。
 
 ---
 
@@ -191,7 +196,7 @@ ARMv6-M 没有 `LDREX`/`STREX`，LLVM 因此不认为任何 32 位原子是无�
 |---|---|---|---|
 | CYT2BL3 (Cortex-M4F) | 1434 B | 280 B | `__aeabi_memclr4` |
 | CYT4BB7 CM0+ | 1428 B | 280 B | `__aeabi_memclr4` + 软浮点 4 个 |
-| CYT4BB7 CM7F / RT1064 | ~1434 B | 280 B | `__aeabi_memclr4` |
+| CYT4BB7 CM7F / RT1064 | 1434 B | 280 B | `__aeabi_memclr4` |
 
 全部由 picolibc 提供（已核对符号表），**无一来自 libatomic**。
 
@@ -202,12 +207,15 @@ ARMv6-M 没有 `LDREX`/`STREX`，LLVM 因此不认为任何 32 位原子是无�
 | `Program` 状态 | 12 B，与指令条数无关 |
 | `TaskState` | 24 B |
 | 每任务额外栈 | 0 |
-| 内核 + 2 任务固件 | 600 B flash / 60 B RAM |
+| `firmware_cortex_m.zig`（Cortex-M0） | 596 B flash / 136 B RAM |
+| `firmware_riscv.zig`（RISC-V32） | 762 B flash / 136 B RAM |
 | 调度抖动 | 0 tick |
+
+Cortex-M0 骨架的 136 B RAM 中 76 B 是示例演示用的 UART 接收环；去掉即 60 B。
 
 ### 6.3 测试
 
-`zig build ci`：**59/59 单元测试通过，7/7 目标编译通过**（含三款 Smartcar 芯片）。
+`zig build ci`：**59/59 单元测试通过，6 个目标交叉编译通过**（含三款 Smartcar 芯片）。
 
 ---
 
@@ -252,14 +260,26 @@ project/zig/
 `main_zig.c` 与 `zig_bridge.h` 的 `zig_setup()` / `zig_loop()` 契约**完全不变**，
 `Makefile` 的 `zig` target 与链接行也**完全不变**。
 
-HAL 适配只有三行：
+HAL 适配只有三个必需函数加一个可选钩子。注意 `criticalEnter`/`criticalExit` 必须成对，
+且**内核自身不嵌套临界区**（见 ARCHITECTURE.md §9），所以保存一个 PRIMASK 副本即可：
 
 ```zig
+var saved_primask: u32 = 0;
+
 pub const BoardHal = struct {
-    pub fn now() Tick { return zf_pit_get_ms(); }
-    pub fn criticalEnter() void { _ = sf.interrupt.globalDisable(); }
-    pub fn criticalExit() void { sf.interrupt.globalEnable(saved); }
-    pub fn idle() void { /* WFI 或空转 */ }
+    pub fn now() Tick {
+        return sf.pit.getMillis();
+    }
+    pub fn criticalEnter() void {
+        saved_primask = sf.interrupt.globalDisable();
+    }
+    pub fn criticalExit() void {
+        sf.interrupt.globalEnable(saved_primask);
+    }
+    /// 可选：调度器空转时调用。
+    pub fn idle() void {
+        // WFI，或留空
+    }
 };
 ```
 
@@ -315,8 +335,8 @@ LibXR 的 `Operation` 模型（发起时绑定完成行为：CALLBACK / BLOCK / 
 |---|---|---|
 | Zig 与 C++ 不能混用同一套模块 | 只能二选一，不能"都要" | Smartcar 的 `language` 轴本就是互斥的；本方案是把 Zig 路径做强，不是合并 |
 | 学生 Zig 学习曲线 | 中 | Zig 语法比 C++20 模板少得多；且 `App` 的声明式写法比手写状态机更接近自然语言 |
-| `Program` 无法表达任意控制流 | 中 | 数据依赖的循环边界仍需手写；已在文档中明说 |
-| 许可冲突 | 中 | 逐飞库是 GPL-3.0；Breeze 若要与模板同仓分发需选 GPL 兼容许可。LibXR/XRobot 是 Apache-2.0，借鉴架构无义务但应致谢 |
+| `Program` 无法表达任意控制流 | 中 | 数据依赖的循环边界仍需手写；已在 ARCHITECTURE.md §9 明说 |
+| **MIT 与 GPL-3.0 的许可冲突** | 高 | 逐飞库是 GPL-3.0。Breeze 是 MIT，两者**不冲突但不可单向合并**：MIT 代码可以放进 GPL 工程（GPL 兼容），但反过来不行。若要把 Breeze 源码直接 vendored 进 Smartcar-Template 生成的工程并整体分发，该分发物整体按 GPL-3.0 处理，需保留逐飞库声明。另一种做法是生成器只引用 Breeze 的发布版而不 vendored 源码 |
 | 三芯片 SDK 差异 | 高 | S2 阶段的工作量主要在这里，与 Breeze 无关 |
 | CRC 多项式未与 LibXR 源码核对 | 低 | 若不需上位机互通则无影响；需要时按 §4.2 复核 |
 
@@ -345,4 +365,14 @@ LibXR 的 `Operation` 模型（发起时绑定完成行为：CALLBACK / BLOCK / 
 | `src/app.zig` | 编译期模块组合与依赖校验 |
 | `examples/firmware_smartcar.zig` | 四模块融合固件示例（三芯片编译验证） |
 | `tools/elfsize.ps1` | flash/RAM 占用测量工具 |
-| `docs/LibXR-XRobot-technical-report.md` | LibXR/XRobot 技术调研报告 |
+| [LIBXR-XROBOT.md](LIBXR-XROBOT.md) | LibXR/XRobot 技术调研报告 |
+
+## 附：致谢与许可
+
+- **Breeze** 采用 [MIT 许可](../LICENSE)。
+- 本项目采纳了 [LibXR](https://github.com/Jiu-xiao/libxr) 与
+  [XRobot](https://github.com/xrobot-org) 的**架构设计思想**（Apache-2.0）。
+  架构与设计思路不受版权保护，但来源应予说明，故在此致谢。
+  Breeze **未包含、未链接 LibXR 的任何源代码**，因此不构成 Apache-2.0 的再分发义务。
+- `include/`、`src/` 下的 C 算法库为同一 MIT 许可下的历史代码。
+- 若把 Breeze vendored 进包含逐飞库（GPL-3.0）的工程分发，请按 §9 处理许可。

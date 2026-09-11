@@ -121,6 +121,7 @@ export fn HardFault_Handler() callconv(.c) void {
 /// Called from the reset handler after `.data`/`.bss` initialisation.
 export fn breeze_main() callconv(.c) noreturn {
     hal.init(64_000_000); // 64 MHz core -> 1 ms SysTick
+    uart_rx_ring.init(); // bind the ring's channel to its own buffer
 
     while (true) {
         sched.run(); // runs in thread mode; `wfi` when nothing is due

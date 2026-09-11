@@ -30,6 +30,7 @@
 
 const tick = @import("../kernel/tick.zig");
 const shared = @import("../kernel/shared.zig");
+const Channel = @import("../kernel/chan.zig").Channel;
 const Tick = tick.Tick;
 
 // --- Cortex-M system control space ----------------------------------------
@@ -107,17 +108,73 @@ pub inline fn isAvailable() bool {
 
 /// Mask configurable interrupts by setting PRIMASK.
 ///
-/// Returns nothing because the kernel's contract is strictly nested
-/// enter/exit; if a caller needs the previous state it should model that
-/// itself. Keeping the pair symmetric means a stray extra `criticalExit`
-/// cannot silently unmask interrupts.
+/// # This pair does not nest
+///
+/// `cpsid i` / `cpsie i` set and clear PRIMASK unconditionally, so a nested
+/// `criticalExit` unmasks interrupts while an outer section still expects them
+/// masked. That is acceptable only because **the kernel never nests**: the sole
+/// user is `kernel/events.zig`, which has two flat enter/exit pairs and calls
+/// neither from within the other.
+///
+/// If a caller introduces nesting - a task signalling an event from inside a
+/// section it already opened - it must save and restore PRIMASK itself:
+///
+/// ```zig
+/// const saved = hal.criticalEnterSaved();
+/// defer hal.criticalExitRestore(saved);
+/// ```
+///
+/// The host backend (`hal/host.zig`) tracks a depth counter instead, so the two
+/// backends differ here; nesting is a documented limitation rather than a
+/// supported behaviour. See ARCHITECTURE.md §9.
 pub inline fn criticalEnter() void {
     asm volatile ("cpsid i" ::: .{ .memory = true });
 }
 
 /// Unmask configurable interrupts by clearing PRIMASK.
+///
+/// See `criticalEnter` for why this must not be nested.
 pub inline fn criticalExit() void {
     asm volatile ("cpsie i" ::: .{ .memory = true });
+}
+
+/// Mask interrupts, returning the previous PRIMASK so it can be restored.
+///
+/// Use this in place of `criticalEnter`/`criticalExit` when nesting is
+/// unavoidable; the kernel itself does not need it.
+pub inline fn criticalEnterSaved() u32 {
+    const primask: u32 = asm volatile ("mrs %[out], primask"
+        : [out] "=r" (-> u32),
+    );
+    asm volatile ("cpsid i" ::: .{ .memory = true });
+    return primask;
+}
+
+/// Restore the PRIMASK value returned by `criticalEnterSaved`.
+pub inline fn criticalExitRestore(saved: u32) void {
+    asm volatile ("msr primask, %[value]"
+        :
+        : [value] "r" (saved),
+        : .{ .memory = true });
+}
+
+/// C-callable wrapper for `criticalEnterSaved`.
+///
+/// Present for two reasons: C code in a mixed project can nest critical
+/// sections, and - more importantly for this file - an exported function is
+/// emitted unconditionally, so the save/restore assembly above is always
+/// assembled and therefore always checked.
+///
+/// A bare `comptime { _ = &criticalEnterSaved; }` reference does **not**
+/// achieve that: it was tried, and a deliberately corrupted mnemonic still
+/// compiled, proving the inline assembly had never been analysed.
+export fn breeze_critical_enter_saved() callconv(.c) u32 {
+    return criticalEnterSaved();
+}
+
+/// C-callable wrapper for `criticalExitRestore`.
+export fn breeze_critical_exit_restore(saved: u32) callconv(.c) void {
+    criticalExitRestore(saved);
 }
 
 /// Wait for an interrupt: the kernel calls this when nothing is runnable.
@@ -134,45 +191,45 @@ pub inline fn watchdogKick() void {}
 
 // --- a lock-free single-producer RX ring -----------------------------------
 
-/// Capacity must be a power of two so the index wrap is a mask.
+/// A byte channel with the storage built in.
+///
+/// This is `kernel/chan.zig`'s `Channel` plus an owned buffer, for the common
+/// case where a HAL just wants a receive ring without declaring backing storage
+/// at the call site. It exists so there is exactly *one* SPSC implementation in
+/// the framework: the index arithmetic, the full/empty rule and the volatile
+/// access discipline all live in `Channel`, and this only supplies the array.
+///
+/// Capacity is one less than the buffer, because a ring that can hold `n` bytes
+/// needs `n + 1` slots to distinguish full from empty.
 pub const RxRing = struct {
-    buf: [capacity]u8 = undefined,
-    head: u32 = 0, // written by the ISR only
-    tail: u32 = 0, // written by the task only
+    storage: [slots]u8 = undefined,
+    chan: Channel(u8, capacity) = undefined,
 
-    pub const capacity: u32 = 64;
-    const mask: u32 = capacity - 1;
+    /// Usable bytes. One slot is sacrificed, and `capacity + 1` must be a power
+    /// of two so the index wrap stays a mask - the same rule `Channel` enforces.
+    pub const capacity: usize = 63;
+    const slots = capacity + 1;
 
-    comptime {
-        if (capacity & (capacity - 1) != 0) {
-            @compileError("RxRing.capacity must be a power of two");
-        }
+    /// Bind the channel to this struct's own buffer.
+    ///
+    /// Must be called once before use. `RxRing` cannot do it in a field
+    /// initialiser because the pointer would not survive the value being moved.
+    pub fn init(self: *RxRing) void {
+        self.chan = Channel(u8, capacity).init(&self.storage);
     }
 
-    /// Push one byte from interrupt context. Drops the byte if full.
-    ///
-    /// The data store is published before the index advance, and the ISR cannot
-    /// be reordered against itself, so the consumer never observes an index
-    /// that points at a byte which has not been written yet.
+    /// Push one byte from interrupt context. Returns false if full.
     pub fn pushFromIsr(self: *RxRing, byte: u8) bool {
-        const next = (self.head +% 1) & mask;
-        if (next == (self.tail & mask)) return false; // full
-        self.buf[self.head & mask] = byte;
-        shared.store(u32, &self.head, next);
-        return true;
+        return self.chan.pushFromIsr(byte);
     }
 
     /// Pop one byte from task context.
     pub fn pop(self: *RxRing) ?u8 {
-        const tail = self.tail & mask;
-        if (tail == shared.load(u32, &self.head)) return null;
-        const byte = self.buf[tail];
-        self.tail = (self.tail +% 1) & mask;
-        return byte;
+        return self.chan.pop();
     }
 
     /// Bytes currently queued.
     pub fn count(self: *const RxRing) u32 {
-        return (shared.load(u32, &self.head) -% self.tail) & mask;
+        return self.chan.count();
     }
 };

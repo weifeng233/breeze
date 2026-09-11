@@ -1,14 +1,14 @@
-## Breeze Framework
+# Breeze Framework
 
 面向 **ARM Cortex-M** 与 **RISC-V** 裸机目标的确定性协作式任务内核，用现代 Zig 编写。
 同一份内核可以在主机上用虚拟时钟运行，因此固件逻辑能在工作站上被精确断言。
 
-> **状态**：内核 + 模块系统已完成，**59 个单元测试 + 7 个目标交叉编译**全部通过
-> （含智能车竞赛的 CYT2BL3 / CYT4BB7 / RT1064 三款芯片）。
-> C 版本的算法库仍保留在 `include/`、`src/` 中，作为算法层迁移的参考，见
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 第 8 节。
+> **状态**：内核与模块系统已实现。`zig build ci` 通过：**59 个单元测试**、
+> **6 个目标交叉编译**（含智能车竞赛的 CYT2BL3 / CYT4BB7 / RT1064）。
+> C 版本算法库仍保留在 `include/`、`src/` 中作为迁移参考，**但它当前无法编译**，
+> 原因见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 第 8 节。
 
-### 设计要点
+## 设计要点
 
 - **确定性**：非抢占、无上下文切换、无堆、无动态任务。任务按声明顺序执行，时序可静态推理。
 - **零栈任务**：每个任务没有独立栈，共用主栈。状态机状态仅 12 字节，与指令条数无关。
@@ -22,7 +22,7 @@
 - **无锁 IPC**：`Channel` 是调用者提供存储的 SPSC 环，`Topic` 是编译期主题 +
   与 LibXR 兼容的遥测帧格式，两者都不分配、不加锁。
 
-### 快速开始
+## 快速开始
 
 ```zig
 const breeze = @import("breeze");
@@ -64,7 +64,7 @@ const instrs = [_]breeze.Instr(Handshake){
 };
 ```
 
-### 模块组合
+## 模块组合
 
 模块用 `Manifest` 声明自己需要什么、提供什么、多久跑一次：
 
@@ -98,9 +98,9 @@ const Sched = App.SchedulerFor(BoardHal);
 `depends` 与 `hardware` 是两条独立的线：前者检查"有没有别的模块提供"，
 后者检查"应用有没有声明这个外设"。把外设包装成假模块只为通过检查是没有意义的。
 
-### 遥测
+## 遥测
 
-`Topic` 在编译期把名字折成 CRC32，帧格式与 LibXR 兼容，现有上位机工具可直接解析：
+`Topic` 在编译期把名字折成 CRC32，帧格式与 LibXR 兼容：
 
 ```zig
 const Attitude = breeze.Topic("attitude", extern struct { roll: f32, pitch: f32, yaw: f32 });
@@ -109,42 +109,70 @@ var buf: [64]u8 = undefined;
 const frame = try Attitude.pack(&buf, &value, timestamp_us);
 ```
 
-### 构建
+> CRC 多项式未在 LibXR 文档中给出，本实现使用 CRC-32/ISO-HDLC 与 CRC-8/ATM。
+> 若要与真实 LibXR 上位机逐字节互通，需先按
+> [docs/FUSION.md](docs/FUSION.md) §4.2 复核。
+
+## 构建
 
 ```bash
 zig build test           # 59 个单元测试
 zig build demo           # 主机虚拟时钟演示
-zig build check-targets  # 交叉编译 7 个目标（含三款智能车芯片）
+zig build check-targets  # 交叉编译 6 个目标
 zig build ci             # 格式检查 + 测试 + 目标编译
 ```
 
-交叉编译不需要额外安装工具链。
+交叉编译不需要额外安装工具链，`build.zig` 里已声明目标。
 
-### 实测开销
+## 实测开销
+
+在 Zig 0.16.0、`-OReleaseSmall` 下实测。复现命令见
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4。
 
 | 项 | 大小 |
 |---|---|
 | `Program` 状态 | 12 字节（与指令条数无关） |
-| `TaskState` | 24 字节 |
+| `TaskState`（每任务） | 24 字节 |
 | 每任务额外栈 | 0 |
-| 内核 + 2 任务固件（Cortex-M0） | 600 B flash / 60 B RAM |
-| 4 模块融合固件（CYT2BL3，含遥测） | 1434 B flash / 280 B RAM |
+| Cortex-M0 固件骨架 | 596 B flash / 136 B RAM |
+| RISC-V32 固件骨架 | 762 B flash / 136 B RAM |
+| 智能车融合固件（CYT2BL3，4 模块 + 遥测） | 1434 B flash / 280 B RAM |
 | 调度抖动 | 0 tick |
 
-### 目标平台支持
+固件骨架的 136 B RAM 中有 76 B 是示例演示用的 64 字节 UART 接收环及其 12 字节头部；
+不使用该环时是 60 B。
 
-| 架构 | 目标 | 状态 |
+## 目标平台支持
+
+| 架构 | 目标三元组 | 状态 |
 |---|---|---|
-| ARM Cortex-M0/M0+/M3/M4/M7 | `thumb-freestanding[-eabihf]` | ✅ 已编译验证 |
-| RISC-V RV32/RV64 | `riscv32-freestanding` / `riscv64-freestanding` | ✅ 已编译验证 |
+| ARM Cortex-M0 / M0+ | `thumb-freestanding-eabi` | ✅ 已编译验证 |
+| ARM Cortex-M4F / M7F | `thumb-freestanding-eabihf` | ✅ 已编译验证 |
+| RISC-V RV32 | `riscv32-freestanding-eabi` | ✅ 已编译验证 |
 | 主机（测试与仿真） | 任意 | ✅ 虚拟时钟后端 |
-| 8051 | — | ❌ Zig 不支持该架构 |
+| 8051 / MCS-51 | — | ❌ Zig 不支持该架构 |
 
-### 文档
+## 文档
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 设计决策、调度语义、中断规则、指令集、实测数据
-- [docs/FUSION.md](docs/FUSION.md) — 与 LibXR/XRobot 及 Smartcar-Template 的融合方案
-- [docs/LibXR-XRobot-technical-report.md](docs/LibXR-XRobot-technical-report.md) — LibXR/XRobot 技术调研
-- `examples/scheduler_demo.zig` — 可运行的主机演示
-- `examples/firmware_smartcar.zig` — 四模块融合固件（三款智能车芯片编译验证）
-- `examples/firmware_cortex_m.zig` / `examples/firmware_riscv.zig` — 目标平台接线示例
+| 文档 | 内容 |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 设计决策、调度语义、中断规则、指令集、实测数据、迁移计划 |
+| [docs/FUSION.md](docs/FUSION.md) | 与 LibXR/XRobot 及 Smartcar-Template 的融合方案 |
+| [docs/LIBXR-XROBOT.md](docs/LIBXR-XROBOT.md) | LibXR/XRobot 技术调研（外部资料核对记录） |
+
+示例代码：
+
+| 文件 | 用途 |
+|---|---|
+| `examples/scheduler_demo.zig` | 可运行的主机演示（`zig build demo`） |
+| `examples/firmware_smartcar.zig` | 四模块融合固件，三款智能车芯片编译验证 |
+| `examples/firmware_cortex_m.zig` | Cortex-M 接线示例，也是交叉编译检查 |
+| `examples/firmware_riscv.zig` | RISC-V 接线示例，同上 |
+
+## 许可证
+
+[MIT](LICENSE)。`include/`、`src/` 下的 C 算法库是同一许可证下的历史代码。
+
+本项目参考了 [LibXR](https://github.com/Jiu-xiao/libxr) 与
+[XRobot](https://github.com/xrobot-org) 的架构设计（均为 Apache-2.0），
+但**未链接其运行时**；借鉴范围的说明见 [docs/FUSION.md](docs/FUSION.md) §3。

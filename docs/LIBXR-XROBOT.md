@@ -1,4 +1,18 @@
-# LibXR / XRobot — Technical Research Report
+# LibXR / XRobot 技术调研报告
+
+> **本文档是外部资料的核对记录，不是 Breeze 的设计文档。**
+> 相关文档：[ARCHITECTURE.md](ARCHITECTURE.md)（内核设计）· [FUSION.md](FUSION.md)（融合方案）
+>
+> **用途**：记录 LibXR / XRobot 的实际机制，为 [FUSION.md](FUSION.md) §3 的
+> "取架构、不取运行时"判断提供依据。Breeze **未包含也未链接** LibXR 的任何源代码，
+> 本文档只在设计层面引用其公开文档与开源实现。
+>
+> **状态**：调研于 2026-09，针对 LibXR `55c20b4`、XRobot `15bff04`、CodeGen `17b9f9e`。
+> 上游是活跃项目，接口可能已变化；引用具体 API 前请复核。
+>
+> **为什么正文是英文**：本报告大量逐字引用上游的 API 名、源码片段与文档原文，
+> 翻译会破坏引用的准确性。因此正文保留英文。未核对与文档缺失之处集中列在第 12 节，
+> 不做推测性补齐。
 
 Research target: the XRobot / LibXR embedded robotics framework.
 Primary sources: <https://xrobot-org.github.io/> (Chinese + English), the generated Doxygen
