@@ -126,9 +126,9 @@ picolibc 归档里，而许多工程用 `-fno-compiler-rt` 编译 Zig 对象。
 | `firmware_cortex_m.zig` → Cortex-M0 | 628 B | 184 B |
 | `firmware_cortex_m.zig` → Cortex-M4F | 672 B | 184 B |
 | `firmware_riscv.zig` → RISC-V32 | 868 B | 200 B |
-| `firmware_smartcar.zig` → CYT2BL3 (CM4F) | 1948 B | 436 B |
-| `firmware_smartcar.zig` → CYT4BB7 CM0+ | 1932 B | 436 B |
-| `firmware_smartcar.zig` → CYT4BB7 CM7F | 1952 B | 436 B |
+| `smartcar/firmware.zig` → CYT2BL3 (CM4F) | 2036 B | 496 B |
+| `smartcar/firmware.zig` → CYT4BB7 CM0+ | 2024 B | 496 B |
+| `smartcar/firmware.zig` → CYT4BB7 CM7F | 2038 B | 496 B |
 
 这张表在 2026-09 重测时发现**已经漂移**：`TaskState` 记的是 24（实际 28），Cortex-M0 骨架
 记的是 596/136（当时实际 616/184），融合固件记的是 1434/280（当时实际 1556/364）——
@@ -184,7 +184,13 @@ src/hal/
   riscv.zig               RISC-V：mtime/mtimecmp、mstatus、WFI、RxRing
 examples/
   scheduler_demo.zig      主机仿真演示（`zig build demo`）
-  firmware_smartcar.zig   四模块融合固件（三款智能车芯片验证）
+  smartcar/               四模块融合固件（三款智能车芯片验证），按模板的粒度分文件：
+    topics.zig              模块之间的通信契约（3 个 topic）
+    board.zig               板级：内核 HAL + 模块 I/O 两个面、缓冲区
+    app.zig                 装配：模块实例、模块表、调度器（对 Io/Hal 泛型）
+    firmware.zig            目标根：中断向量 + 入口（check-targets 编的就是它）
+    app_test.zig            主机测试：用假 I/O 跑真实的模块图
+    modules/                每个模块一个文件，对 I/O 面泛型
   firmware_cortex_m.zig   Cortex-M 接线示例（也是交叉编译检查）
   firmware_riscv.zig      RISC-V 接线示例（同上）
 tools/
@@ -304,3 +310,6 @@ include/breeze/math/interpolation.h:241:13: error: static declaration of
   这类逻辑仍需写成 `call_until` 谓词或普通函数。
 * 单个任务不让出会独占循环；用 `worstLateness()` / `totalResyncs()` 检测。
 * 遥测帧的 CRC 多项式未与 LibXR 源码核对，见 [FUSION.md](FUSION.md) §9。
+
+
+

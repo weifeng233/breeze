@@ -3,7 +3,7 @@
 面向 **ARM Cortex-M** 与 **RISC-V** 裸机目标的确定性协作式任务内核，用现代 Zig 编写。
 同一份内核可以在主机上用虚拟时钟运行，因此固件逻辑能在工作站上被精确断言。
 
-> **状态**：内核与模块系统已实现。`zig build ci` 通过：**108 个单元测试**、
+> **状态**：内核与模块系统已实现。`zig build ci` 通过：**109 个内核单元测试**、**14 个应用测试**、
 > **7 个目标交叉编译**（CYT2BL3、CYT4BB7 的 CM0+ 与 CM7、RT1064 各有一个具名目标）。
 > 这两个数字由 CI 校验，不允许漂移（见 `.github/workflows/ci.yml`）。
 > C 版本算法库仍保留在 `include/`、`src/` 中作为迁移参考，**但它当前无法编译**，
@@ -119,7 +119,7 @@ const frame = try Attitude.pack(&buf, &value, timestamp_us);
 ## 构建
 
 ```bash
-zig build test           # 108 个单元测试
+zig build test           # 109 个内核单元测试 + 14 个应用测试
 zig build demo           # 主机虚拟时钟演示
 zig build check-targets  # 交叉编译 7 个目标
 zig build ci             # 格式检查 + 测试 + 目标编译
@@ -161,7 +161,7 @@ pwsh tools/vendor.ps1 -Dest ../my-project/lib/breeze -Check
 | `Join.Of(T, cap)` | `cap` 字节 + `cap`×`sizeof(T)`（如 `Join.Of(u16, 2)` = 8 字节） |
 | Cortex-M0 固件骨架 | 628 B flash / 184 B RAM |
 | RISC-V32 固件骨架 | 868 B flash / 200 B RAM |
-| 智能车融合固件（CYT2BL3，4 模块 + 遥测） | 1948 B flash / 436 B RAM |
+| 智能车融合固件（CYT2BL3，4 模块 + 遥测） | 2036 B flash / 496 B RAM |
 | 调度抖动 | 0 tick |
 
 固件骨架的 184 B RAM 中，76 B 是示例演示用的 64 字节 UART 接收环及其 12 字节通道头部，
@@ -221,9 +221,15 @@ RT1064 与 CYT4BB7 的 CM7 核三元组完全相同，因此二者共享同一�
 | 文件 | 用途 |
 |---|---|
 | `examples/scheduler_demo.zig` | 可运行的主机演示（`zig build demo`） |
-| `examples/firmware_smartcar.zig` | 四模块融合固件，三款智能车芯片各有具名编译验证目标 |
+| `examples/smartcar/` | 四模块融合固件，三款智能车芯片各有具名编译验证目标；模块对 I/O 面泛型，同一份模块图另有主机测试（`zig build test`） |
+| `examples/smartcar/modules/` | 每个模块一个文件，只依赖 I/O 面，不依赖任何外设 |
 | `examples/firmware_cortex_m.zig` | Cortex-M 接线示例，也是交叉编译检查 |
 | `examples/firmware_riscv.zig` | RISC-V 接线示例，同上 |
+
+`examples/smartcar/` 的分法与 Smartcar-Template 生成出来的工程同粒度：`board.zig` 给出
+内核 HAL 与模块 I/O 两个面，`app.zig` 只做装配，`modules/` 一个模块一个文件，`firmware.zig`
+是唯一的目标相关文件。区别只有一处，而且是有意的：模板的主机测试必须**镜像**一份装配
+（它的板级文件会拉进逐飞的 C 库），这里 `App(Io, Hal)` 是函数，测试直接实例化真实的那份。
 
 ## 许可证
 
@@ -232,4 +238,6 @@ RT1064 与 CYT4BB7 的 CM7 核三元组完全相同，因此二者共享同一�
 本项目参考了 [LibXR](https://github.com/Jiu-xiao/libxr) 与
 [XRobot](https://github.com/xrobot-org) 的架构设计（均为 Apache-2.0），
 但**未链接其运行时**；借鉴范围的说明见 [docs/FUSION.md](docs/FUSION.md) §3。
+
+
 

@@ -18,7 +18,7 @@
 | 语言 | Zig（freestanding） | C++20，必须编译 | C 或 Zig（`zig cc`） |
 | 调度 | comptime 任务表 + 周期栅格 | **无自己的抢占调度**（`MonitorAll` 是 1000ms 监督循环） | cyt2bl3 有槽位调度器；另两芯片没有 |
 | 内存 | 零堆、零任务栈 | 运行期 `SPSCQueue`/`Callback::Create` 会堆分配 | 无约束 |
-| 规模 | 融合固件 1948 B flash / 436 B RAM（实测） | 完整框架 | 完整 SDK + 逐飞库 |
+| 规模 | 融合固件 2036 B flash / 496 B RAM（实测） | 完整框架 | 完整 SDK + 逐飞库 |
 | 许可 | **MIT** | Apache-2.0 | GPL-3.0（逐飞库约束） |
 | 目标 | Cortex-M / RISC-V | STM32/ESP32/HPM/CH32/MSPM0/Linux/… | CYT2BL3 / CYT4BB7 / RT1064 |
 
@@ -190,13 +190,13 @@ ARMv6-M 没有 `LDREX`/`STREX`，LLVM 因此不认为任何 32 位原子是无�
 
 ## 6. 实测数据
 
-### 6.1 融合固件（`examples/firmware_smartcar.zig`：4 个模块 + 3 个 topic + 2 个 channel）
+### 6.1 融合固件（`examples/smartcar/`：4 个模块 + 3 个 topic + 2 个 channel）
 
 | 目标 | Flash | RAM | 外部依赖 |
 |---|---|---|---|
-| CYT2BL3 (Cortex-M4F) | 1948 B | 436 B | `__aeabi_memclr4` |
-| CYT4BB7 CM0+ | 1932 B | 436 B | `__aeabi_memclr4` + 软浮点 3 处 + 64 位整数 1 处 |
-| CYT4BB7 CM7F / RT1064 | 1952 B | 436 B | `__aeabi_memclr4` |
+| CYT2BL3 (Cortex-M4F) | 2036 B | 496 B | `__aeabi_memclr4` |
+| CYT4BB7 CM0+ | 2024 B | 496 B | `__aeabi_memclr4` + 软浮点 3 处 + 64 位整数 1 处 |
+| CYT4BB7 CM7F / RT1064 | 2038 B | 496 B | `__aeabi_memclr4` |
 
 全部由 picolibc 提供，**无一来自 libatomic**。（尺寸与依赖列在 2026-09 重新测量过；
 办法是把产物当字节串搜符号名，能查出"引用了什么"，查不出别的。RAM 一列含 `.data`
@@ -519,7 +519,7 @@ LibXR 的 `Operation` 模型（发起时绑定完成行为：CALLBACK / BLOCK / 
 | `src/kernel/chan.zig` | 调用者提供存储的无锁 SPSC channel |
 | `src/kernel/topic.zig` | comptime 主题 + LibXR 兼容遥测帧 + CRC |
 | `src/app.zig` | 编译期模块组合与依赖校验 |
-| `examples/firmware_smartcar.zig` | 四模块融合固件示例（三芯片编译验证） |
+| `examples/smartcar/` | 四模块融合固件示例（三芯片编译验证 + 主机测试） |
 | `tools/elfsize.ps1` | flash/RAM 占用测量工具 |
 | [LIBXR-XROBOT.md](LIBXR-XROBOT.md) | LibXR/XRobot 技术调研报告 |
 
@@ -602,3 +602,8 @@ Breeze 的答案是 `src/kernel/shared.zig` 的 volatile 纪律（`Scheduler` �
   Breeze **未包含、未链接 LibXR 的任何源代码**，因此不构成 Apache-2.0 的再分发义务。
 - `include/`、`src/` 下的 C 算法库为同一 MIT 许可下的历史代码。
 - 若把 Breeze vendored 进包含逐飞库（GPL-3.0）的工程分发，请按 §9 处理许可。
+
+
+
+
+

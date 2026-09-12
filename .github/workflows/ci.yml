@@ -64,14 +64,25 @@ jobs:
       # restates a measurement goes stale silently, so the claim is checked
       # rather than trusted. ARCHITECTURE.md and FUSION.md deliberately no
       # longer repeat these numbers; README is the single source.
-      - name: README's test count must match reality
+      #
+      # Two suites now: the kernel's own tests, and the example application's,
+      # which run on the host because its modules take their I/O surface as a
+      # comptime parameter. Both counts are claimed separately, so adding a test
+      # to either one fails here until README is updated.
+      - name: README's test counts must match reality
         run: |
-          actual=$(zig test src/breeze.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
-          claimed=$(grep -o '\*\*[0-9]* 个单元测试\*\*' README.md | head -1 | grep -o '[0-9]*')
-          echo "README claims: $claimed   actual: $actual"
-          test -n "$actual" || { echo "could not parse the test count"; exit 1; }
-          test -n "$claimed" || { echo "could not parse README's claim"; exit 1; }
-          test "$actual" = "$claimed"
+          kernel=$(zig test src/breeze.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
+          app=$(zig test --dep breeze -Mroot=examples/smartcar/app_test.zig -Mbreeze=src/breeze.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
+          claimed_kernel=$(grep -o '\*\*[0-9]* 个内核单元测试\*\*' README.md | head -1 | grep -o '[0-9]*')
+          claimed_app=$(grep -o '\*\*[0-9]* 个应用测试\*\*' README.md | head -1 | grep -o '[0-9]*')
+          echo "kernel: claimed=$claimed_kernel actual=$kernel"
+          echo "app:    claimed=$claimed_app actual=$app"
+          test -n "$kernel" || { echo "could not parse the kernel test count"; exit 1; }
+          test -n "$app" || { echo "could not parse the app test count"; exit 1; }
+          test -n "$claimed_kernel" || { echo "could not parse README's kernel claim"; exit 1; }
+          test -n "$claimed_app" || { echo "could not parse README's app claim"; exit 1; }
+          test "$kernel" = "$claimed_kernel"
+          test "$app" = "$claimed_app"
 
       - name: README's target count must match reality
         run: |

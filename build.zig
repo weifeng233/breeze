@@ -15,8 +15,25 @@ pub fn build(b: *std.Build) void {
     const unit_tests = b.addTest(.{ .root_module = breeze });
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
-    const test_step = b.step("test", "Run kernel unit tests");
+    const test_step = b.step("test", "Run kernel unit tests and the application tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    // The example application's tests run on the host like any other, because
+    // its modules take their I/O surface as a comptime parameter rather than
+    // reaching for a peripheral. Without this the example would only ever be
+    // *compiled*: a boot sequence that restarted itself on every pass, or a
+    // gather that never completed, would be a bench discovery. Both of those
+    // happened before this step existed.
+    const app_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/smartcar/app_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "breeze", .module = breeze }},
+        }),
+    });
+    const run_app_tests = b.addRunArtifact(app_tests);
+    test_step.dependOn(&run_app_tests.step);
 
     // --- host demo ---------------------------------------------------------
     const demo = b.addExecutable(.{
@@ -92,7 +109,7 @@ pub fn build(b: *std.Build) void {
         // --- the three Smartcar targets, plus the fusion example -----------
         .{
             .name = "smartcar_cyt2bl3",
-            .example = "examples/firmware_smartcar.zig",
+            .example = "examples/smartcar/firmware.zig",
             .query = .{
                 .cpu_arch = .thumb,
                 .os_tag = .freestanding,
@@ -103,7 +120,7 @@ pub fn build(b: *std.Build) void {
         },
         .{
             .name = "smartcar_cyt4bb7_cm0p",
-            .example = "examples/firmware_smartcar.zig",
+            .example = "examples/smartcar/firmware.zig",
             .query = .{
                 .cpu_arch = .thumb,
                 .os_tag = .freestanding,
@@ -113,7 +130,7 @@ pub fn build(b: *std.Build) void {
         },
         .{
             .name = "smartcar_cyt4bb7_cm7",
-            .example = "examples/firmware_smartcar.zig",
+            .example = "examples/smartcar/firmware.zig",
             .query = .{
                 .cpu_arch = .thumb,
                 .os_tag = .freestanding,
@@ -125,7 +142,7 @@ pub fn build(b: *std.Build) void {
         .{
             // Same triple as the entry above; see the comment on check_step.
             .name = "smartcar_rt1064",
-            .example = "examples/firmware_smartcar.zig",
+            .example = "examples/smartcar/firmware.zig",
             .query = .{
                 .cpu_arch = .thumb,
                 .os_tag = .freestanding,
@@ -178,5 +195,6 @@ pub fn build(b: *std.Build) void {
     const ci = b.step("ci", "Format check, unit tests and target builds");
     ci.dependOn(&fmt_c.step);
     ci.dependOn(&run_unit_tests.step);
+    ci.dependOn(&run_app_tests.step);
     ci.dependOn(check_step);
 }

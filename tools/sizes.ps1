@@ -37,7 +37,7 @@ $targets = @(
        Root = 'examples/firmware_riscv.zig'
        Triple = 'riscv32-freestanding-eabi'; Cpu = 'baseline_rv32' }
     @{ Label = '智能车融合固件'; Bin = 'fusion_cyt2bl3'
-       Root = 'examples/firmware_smartcar.zig'
+       Root = 'examples/smartcar/firmware.zig'
        Triple = 'thumb-freestanding-eabihf'; Cpu = 'cortex_m4+vfp4d16sp' }
 )
 
@@ -113,3 +113,4 @@ if ($bad -gt 0) {
 
 Write-Output ''
 Write-Output 'README cost table matches the images.'
+
