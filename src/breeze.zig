@@ -183,5 +183,14 @@ test {
     std.testing.refAllDecls(hal.host);
     // Pull in the kernel-only root so its re-exports stay valid, and so the file
     // that `tools/vendor.ps1` ships is compiled on every test run.
+    //
+    // The two files list the kernel surface independently, which is a place
+    // where API can go to die quietly: something added here and forgotten there
+    // costs a vendored project a type and fails nothing. A guard for it was
+    // attempted and abandoned - see docs/REVIEW.md §20 - because Zig 0.16
+    // removed `is_pub` from `Type.Declaration`, so reflection cannot tell an
+    // exported name from a private helper. Until that changes, the invariant is
+    // kept by reading, and `tools/vendor.ps1 -Check` at least proves the two
+    // repositories agree on the file's *bytes*.
     _ = @import("breeze_kernel.zig");
 }
