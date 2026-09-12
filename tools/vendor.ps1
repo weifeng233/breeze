@@ -50,7 +50,8 @@ $kernelFiles = @(
     'hal.zig',
     'shared.zig',
     'chan.zig',
-    'topic.zig'
+    'topic.zig',
+    'orchestrate.zig'
 )
 
 # Platform backends copied alongside the kernel, as `hal/<name>`.

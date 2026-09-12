@@ -66,6 +66,7 @@ pub const kernel = struct {
     pub const shared = @import("kernel/shared.zig");
     pub const chan = @import("kernel/chan.zig");
     pub const topic = @import("kernel/topic.zig");
+    pub const orchestrate = @import("kernel/orchestrate.zig");
 };
 
 /// Composable modules and applications.
@@ -109,6 +110,20 @@ pub const CountedChannel = kernel.chan.CountedChannel;
 
 /// A compile-time publish/subscribe topic with LibXR-compatible framing.
 pub const Topic = kernel.topic.Topic;
+
+/// Counts outstanding branches and remembers whether any failed.
+///
+/// Scheduler-independent: usable from a task, from an ISR, or from a host test.
+pub const Join = kernel.orchestrate.Join;
+
+/// Bounds how many units of a large batch are in flight at once.
+pub const Limiter = kernel.orchestrate.Limiter;
+
+/// What an overrun hook is told: which task, and how late it was.
+pub const Overrun = kernel.scheduler.Overrun;
+
+/// Signature for `Scheduler.setOverrunHook`.
+pub const OverrunHook = kernel.scheduler.OverrunHook;
 
 /// Telemetry framing constants.
 pub const telemetry = struct {
@@ -163,6 +178,7 @@ test {
     std.testing.refAllDecls(kernel.shared);
     std.testing.refAllDecls(kernel.chan);
     std.testing.refAllDecls(kernel.topic);
+    std.testing.refAllDecls(kernel.orchestrate);
     std.testing.refAllDecls(app);
     std.testing.refAllDecls(hal.host);
     // Pull in the kernel-only root so its re-exports stay valid, and so the file

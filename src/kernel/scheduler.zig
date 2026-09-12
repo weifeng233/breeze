@@ -46,7 +46,42 @@ pub const TaskState = struct {
     max_late: u32 = 0,
     /// Times the fixed grid was missed by more than a full period.
     resyncs: u32 = 0,
+    /// Activations later than the task's `.max_late_ms` threshold.
+    ///
+    /// Stays zero for a task that does not set one, so the field costs nothing
+    /// to carry for projects that never look at it.
+    overruns: u32 = 0,
 };
+
+/// What an overrun hook is told.
+pub const Overrun = struct {
+    /// Index into the task table, i.e. the declaration order.
+    index: u32,
+    /// Comptime name of the task, from its definition.
+    name: []const u8,
+    /// How late this activation was, in milliseconds.
+    late_ms: u32,
+};
+
+/// Called when a task's activation exceeds its `.max_late_ms` threshold.
+///
+/// # What this is for
+///
+/// `worstLateness()` is a *pull* metric: something has to ask. This is the
+/// *push* side, for a project that wants to log, count or trip a fault the
+/// moment a deadline is missed rather than at the next poll.
+///
+/// # Restrictions
+///
+/// The hook runs inside `run()`, between the moment lateness is measured and
+/// the moment the task body is entered. It must therefore not call back into
+/// the same scheduler - `raise`, `clearEvents` and a nested `run` are all
+/// off-limits. Setting a flag, incrementing a counter, or writing to a
+/// `Channel` is fine. Treat it like an ISR with a slightly larger budget.
+///
+/// Keep it short: it executes while the task it is complaining about is already
+/// late.
+pub const OverrunHook = *const fn (info: Overrun, user: ?*anyopaque) void;
 
 /// Build a scheduler over a compile-time task table.
 ///
@@ -58,6 +93,7 @@ pub const TaskState = struct {
 ///     .period_ms = 20,                // 0 = poll on every pass
 ///     .ctx = &control_ctx,            // pointer to the task's context struct
 ///     .poll = Control.poll,           // fn (*Ctx, Tick, u32) Step
+///     .max_late_ms = 5,               // optional: lateness that counts as an overrun
 /// }
 /// ```
 ///
@@ -86,8 +122,31 @@ pub fn Scheduler(comptime Hal: type, comptime defs: anytype) type {
         /// Passes on which no task was runnable.
         idle_passes: u32 = 0,
 
+        /// Optional notification when a task's activation exceeds its
+        /// `.max_late_ms` threshold. See `OverrunHook`.
+        ///
+        /// Null costs the counter below nothing and the call site one
+        /// predictable-not-taken branch, so a project that does not want this
+        /// pays only the eight bytes of the two pointers. Install it with
+        /// `setOverrunHook`.
+        on_overrun: ?OverrunHook = null,
+
+        /// Passed through to `on_overrun` untouched; the scheduler never looks
+        /// at it.
+        overrun_user: ?*anyopaque = null,
+
         pub fn init() Self {
             return .{};
+        }
+
+        /// Install (or clear) the overrun notification.
+        ///
+        /// Separate from `init` so that `init` stays a pure value with no
+        /// arguments, and so that a project can turn the hook on later without
+        /// the scheduler type changing.
+        pub fn setOverrunHook(self: *Self, hook: ?OverrunHook, user: ?*anyopaque) void {
+            self.on_overrun = hook;
+            self.overrun_user = user;
         }
 
         /// Comptime name of task `i`.
@@ -133,6 +192,23 @@ pub fn Scheduler(comptime Hal: type, comptime defs: anytype) type {
                         const late = tick.elapsed(st.next_run, now);
                         st.last_late = late;
                         if (late > st.max_late) st.max_late = late;
+
+                        // Overrun detection is opt-in per task: a definition
+                        // that does not carry `.max_late_ms` never evaluates
+                        // this, so the common case is one comptime-known
+                        // comparison that folds away.
+                        if (comptime maxLateOf(def)) |threshold| {
+                            if (late > threshold) {
+                                st.overruns +%= 1;
+                                if (self.on_overrun) |hook| {
+                                    hook(.{
+                                        .index = @intCast(i),
+                                        .name = def.name,
+                                        .late_ms = late,
+                                    }, self.overrun_user);
+                                }
+                            }
+                        }
                     }
 
                     st.runs += 1;
@@ -179,6 +255,32 @@ pub fn Scheduler(comptime Hal: type, comptime defs: anytype) type {
             }
             return total;
         }
+
+        /// Total activations that exceeded a task's `.max_late_ms` threshold.
+        ///
+        /// Tasks that set no threshold contribute nothing, so a zero result
+        /// means either "nothing overran" or "nothing is being watched" - check
+        /// that at least one definition carries `.max_late_ms` before reading
+        /// this as an all-clear.
+        pub fn totalOverruns(self: *const Self) u32 {
+            var total: u32 = 0;
+            inline for (0..task_count) |i| {
+                total += self.states[i].overruns;
+            }
+            return total;
+        }
+
+        /// True if any task definition declares `.max_late_ms`.
+        ///
+        /// Lets a monitoring task distinguish "no overruns happened" from "no
+        /// overruns could have been seen", which is the difference between a
+        /// green light and a light that was never wired up.
+        pub fn observesOverruns() bool {
+            inline for (defs) |def| {
+                if (comptime maxLateOf(def) != null) return true;
+            }
+            return false;
+        }
     };
 }
 
@@ -198,7 +300,34 @@ fn validateDefs(comptime defs: anytype) void {
                 ));
             }
         }
+        // `max_late_ms` is optional, but a misspelt or nonsensical one would
+        // silently disable overrun detection for that task - the exact failure
+        // the hook exists to prevent - so reject it rather than ignore it.
+        //
+        // The type check accepts `comptime_int` too, because an integer literal
+        // in a task definition has that type and not `u32`. Range and sign are
+        // left to the coercion in `maxLateOf`.
+        if (@hasField(@TypeOf(def), "max_late_ms")) {
+            switch (@typeInfo(@TypeOf(def.max_late_ms))) {
+                .int, .comptime_int => {},
+                else => @compileError(std.fmt.comptimePrint(
+                    "task '{s}'.max_late_ms must be an integer number of milliseconds, got {s}",
+                    .{ def.name, @typeName(@TypeOf(def.max_late_ms)) },
+                )),
+            }
+        }
     }
+}
+
+/// The `.max_late_ms` threshold of a task definition, or null if it has none.
+///
+/// Returned as `?u32` so the caller can use `if (comptime ...)` and have the
+/// whole overrun check disappear for definitions that do not opt in. A value
+/// that cannot coerce to `u32` is a compile error here, which is where a
+/// negative or oversized threshold gets caught.
+fn maxLateOf(comptime def: anytype) ?u32 {
+    if (!@hasField(@TypeOf(def), "max_late_ms")) return null;
+    return @as(u32, def.max_late_ms);
 }
 
 // --- test fixtures ---------------------------------------------------------
@@ -332,7 +461,6 @@ test "a stalled loop is detected rather than silently bursting" {
         .{ .name = "p10", .period_ms = 10, .ctx = &Fixture.counter_a, .poll = Fixture.CountA.poll },
     });
     var sched = S.init();
-
     host.HostHal.setNow(0);
     sched.run();
     try std.testing.expectEqual(@as(u32, 1), Fixture.counter_a);
@@ -631,4 +759,148 @@ test "task names are readable at comptime" {
     try std.testing.expectEqualStrings("alpha", S.taskName(0));
     try std.testing.expectEqualStrings("beta", S.taskName(1));
     try std.testing.expectEqual(@as(usize, 2), S.task_count);
+}
+
+// --- overrun detection -----------------------------------------------------
+
+/// Records what the overrun hook was told. File scope for the same reason task
+/// contexts are: the scheduler holds a pointer to it for the whole run.
+const OverrunLog = struct {
+    calls: u32 = 0,
+    last_index: u32 = 0,
+    last_late: u32 = 0,
+    last_name: []const u8 = "",
+
+    var log: OverrunLog = .{};
+
+    fn reset() void {
+        log = .{};
+    }
+
+    fn hook(info: Overrun, user: ?*anyopaque) void {
+        _ = user;
+        log.calls += 1;
+        log.last_index = info.index;
+        log.last_late = info.late_ms;
+        log.last_name = info.name;
+    }
+};
+
+test "a task with no max_late_ms is never counted as overrunning" {
+    Fixture.reset();
+    OverrunLog.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{ .name = "plain", .period_ms = 10, .ctx = &Fixture.counter_a, .poll = Fixture.CountA.poll },
+    });
+    var sched = S.init();
+    sched.setOverrunHook(OverrunLog.hook, null);
+
+    // The scheduler is deliberately not observable for this task, which is
+    // what `observesOverruns` exists to let a monitor notice.
+    try std.testing.expect(!S.observesOverruns());
+
+    host.HostHal.setNow(0);
+    sched.run();
+    // Stall past ten whole periods: lateness is large, but nothing is watching.
+    host.HostHal.setNow(100);
+    sched.run();
+
+    try std.testing.expect(sched.worstLateness() > 0);
+    try std.testing.expectEqual(@as(u32, 0), sched.totalOverruns());
+    try std.testing.expectEqual(@as(u32, 0), OverrunLog.log.calls);
+}
+
+test "the overrun hook fires once per late activation, with the task's name" {
+    Fixture.reset();
+    OverrunLog.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{
+            .name = "watched",
+            .period_ms = 10,
+            .ctx = &Fixture.counter_a,
+            .poll = Fixture.CountA.poll,
+            .max_late_ms = 5,
+        },
+    });
+    var sched = S.init();
+    sched.setOverrunHook(OverrunLog.hook, null);
+
+    try std.testing.expect(S.observesOverruns());
+
+    host.HostHal.setNow(0);
+    sched.run();
+    // On time: no overrun.
+    try std.testing.expectEqual(@as(u32, 0), sched.totalOverruns());
+    try std.testing.expectEqual(@as(u32, 0), OverrunLog.log.calls);
+
+    // 100 ms late, which is over the 5 ms threshold.
+    host.HostHal.setNow(100);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 1), sched.totalOverruns());
+    try std.testing.expectEqual(@as(u32, 1), OverrunLog.log.calls);
+    try std.testing.expectEqualStrings("watched", OverrunLog.log.last_name);
+    try std.testing.expectEqual(@as(u32, 0), OverrunLog.log.last_index);
+    try std.testing.expectEqual(@as(u32, 90), OverrunLog.log.last_late);
+
+    // The grid resynced, so the next activation is on time again: the counter
+    // tracks overruns, not "has ever overrun".
+    host.HostHal.setNow(110);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 1), sched.totalOverruns());
+    try std.testing.expectEqual(@as(u32, 1), OverrunLog.log.calls);
+}
+
+test "the overrun hook reports which task, when several are watched" {
+    Fixture.reset();
+    OverrunLog.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{ .name = "first", .period_ms = 10, .ctx = &Fixture.counter_a, .poll = Fixture.CountA.poll, .max_late_ms = 1 },
+        .{ .name = "second", .period_ms = 10, .ctx = &Fixture.counter_b, .poll = Fixture.CountB.poll, .max_late_ms = 1 },
+    });
+    var sched = S.init();
+    sched.setOverrunHook(OverrunLog.hook, null);
+
+    host.HostHal.setNow(0);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 0), OverrunLog.log.calls);
+
+    // Both are late by the same amount, so both must report; the log keeps the
+    // last one, and the index must match the second declaration.
+    host.HostHal.setNow(50);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 2), OverrunLog.log.calls);
+    try std.testing.expectEqual(@as(u32, 1), OverrunLog.log.last_index);
+    try std.testing.expectEqualStrings("second", OverrunLog.log.last_name);
+    try std.testing.expectEqual(@as(u32, 2), sched.totalOverruns());
+}
+
+test "clearing the overrun hook stops the notifications but not the counting" {
+    Fixture.reset();
+    OverrunLog.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{ .name = "w", .period_ms = 10, .ctx = &Fixture.counter_a, .poll = Fixture.CountA.poll, .max_late_ms = 1 },
+    });
+    var sched = S.init();
+
+    host.HostHal.setNow(50);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 1), sched.totalOverruns());
+    try std.testing.expectEqual(@as(u32, 0), OverrunLog.log.calls);
+
+    sched.setOverrunHook(OverrunLog.hook, null);
+    host.HostHal.setNow(100);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 2), sched.totalOverruns());
+    try std.testing.expectEqual(@as(u32, 1), OverrunLog.log.calls);
+
+    sched.setOverrunHook(null, null);
+    host.HostHal.setNow(200);
+    sched.run();
+    // Counting continues; only the push notification stopped.
+    try std.testing.expectEqual(@as(u32, 3), sched.totalOverruns());
+    try std.testing.expectEqual(@as(u32, 1), OverrunLog.log.calls);
 }
