@@ -509,6 +509,65 @@ LibXR 的 `Operation` 模型（发起时绑定完成行为：CALLBACK / BLOCK / 
 | `tools/elfsize.ps1` | flash/RAM 占用测量工具 |
 | [LIBXR-XROBOT.md](LIBXR-XROBOT.md) | LibXR/XRobot 技术调研报告 |
 
+---
+
+## 11. 与 zig-orch 的关系
+
+`zig-orch` 是同一作者的另一个协作式编排内核，面向"主循环 + 偶发耗时任务"
+场景（帧预算、片轮转、三级优先级、动态 spawn、可取消句柄、mquickjs 的 VM
+抢占接缝）。两边解决的问题相邻，因此评估过是否合并。结论是**在接缝处融合，
+不合并内核**。
+
+### 取了什么
+
+`Join`（等待 N 个分支归位）与 `Limiter`（限制在飞窗口）搬进了
+`src/kernel/orchestrate.zig`。两者都不依赖调度器——它们只是"带规则的计数器"，
+所以可以从任务、ISR 或主机测试里用，而 Breeze 的调度器不需要为它们长出一个
+特性。它们与 `Program` 的配合是自然的：序列通过 `call_until` 等一个 `Join`。
+
+第三个是**超预算检测**，但不是照搬。`zig-orch` 在 `Hooks` 里声明了
+`on_overrun` 却从未调用它，`defers` 计数器也只增不读——是个死钩子。Breeze
+这边把它真正接上了：任务可声明 `.max_late_ms`，`TaskState.overruns` 计数，
+`setOverrunHook` 提供推送通知，另有 `observesOverruns()` 用来区分"没有超预算"
+和"根本没在观察"。
+
+### 没取什么，以及为什么
+
+| 不合并 | 原因 |
+|---|---|
+| 运行期 slot 池 + epoch 句柄 | Breeze 的 comptime 任务表是承重墙：`App`/`Manifest` 的模块图、零 RAM 任务表、声明顺序的确定性都建在它上面。整体替换等于用 zig-orch 取代 Breeze，不是融合 |
+| 帧预算 + 片轮转调度 | 与"固定周期栅格、时序可静态推理"冲突；两者优化目标不同 |
+| 三级优先级 | 同上。Breeze 用声明顺序表达依赖优先级，且是可静态审阅的 |
+| `Channel` | Breeze 已有一份，且在 ARMv6-M 上能链接（见下） |
+| `Tick = u64` | Breeze 用 u32 + 有符号差值比较，构造上抗回绕，在 32 位目标上还省一半空间 |
+
+### 一个共同的硬约束：ARMv6-M 上没有原子 RMW
+
+两边都独立撞上了同一件事，所以值得记在这里。在
+`thumb-freestanding-eabi -mcpu cortex_m0plus` 上实测：
+
+| `std.atomic.Value(u32)` 操作 | 结果 |
+|---|---|
+| `load` / `store` | 内联，无依赖 |
+| `swap` / `fetchOr` / `fetchAdd` / `cmpxchg` | `__atomic_exchange_4` / `_fetch_or_4` / `_fetch_add_4` / `_compare_exchange_4` 库调用 |
+
+而 `thumb-freestanding` 不提供这些符号——**即使 Zig 自带的 compiler_rt 也不提供**，
+实测链接失败（`-fno-compiler-rt` 只是让它更早失败）。所以问题只在
+read-modify-write 上，不是"原子操作都不能用"。
+
+Breeze 的答案是 `src/kernel/shared.zig` 的 volatile 纪律（`Scheduler` 与
+`EventFlags` 在 M0+ 上的对象里 `__atomic` 引用数为零）。zig-orch 在评估后采用了
+同一手法：`Channel` 改为 volatile（每个索引只有一个写者），`takeDeferred` 的
+读-清改为临界区。
+
+顺带发现 `zig-orch` 的 `zig build check-freestanding` 是空转的：它用
+`addObject` 编 `orch.zig`，而 Zig 对泛型惰性分析、没有调用点就一行都不分析
+（产物 516 B），且对象不解析符号。即使改成 `addExecutable`，Zig 对没有下游
+消费者的 artifact 会传 `-fno-emit-bin`，**链接根本不执行**。要让它真的有牙齿，
+必须安装产物以强制 emit。这一点是实测出来的：把回归代码放回去之后，那一步
+依然报 success。
+
+
 ## 附：致谢与许可
 
 - **Breeze** 采用 [MIT 许可](../LICENSE)。
