@@ -3,7 +3,7 @@
 面向 **ARM Cortex-M** 与 **RISC-V** 裸机目标的确定性协作式任务内核，用现代 Zig 编写。
 同一份内核可以在主机上用虚拟时钟运行，因此固件逻辑能在工作站上被精确断言。
 
-> **状态**：内核与模块系统已实现。`zig build ci` 通过：**104 个单元测试**、
+> **状态**：内核与模块系统已实现。`zig build ci` 通过：**108 个单元测试**、
 > **7 个目标交叉编译**（CYT2BL3、CYT4BB7 的 CM0+ 与 CM7、RT1064 各有一个具名目标）。
 > 这两个数字由 CI 校验，不允许漂移（见 `.github/workflows/ci.yml`）。
 > C 版本算法库仍保留在 `include/`、`src/` 中作为迁移参考，**但它当前无法编译**，
@@ -119,7 +119,7 @@ const frame = try Attitude.pack(&buf, &value, timestamp_us);
 ## 构建
 
 ```bash
-zig build test           # 104 个单元测试
+zig build test           # 108 个单元测试
 zig build demo           # 主机虚拟时钟演示
 zig build check-targets  # 交叉编译 7 个目标
 zig build ci             # 格式检查 + 测试 + 目标编译
@@ -159,18 +159,19 @@ pwsh tools/vendor.ps1 -Dest ../my-project/lib/breeze -Check
 | 每任务额外栈 | 0 |
 | `Join` / `Limiter` | 4 / 12 字节 |
 | `Join.Of(T, cap)` | `cap` 字节 + `cap`×`sizeof(T)`（如 `Join.Of(u16, 2)` = 8 字节） |
-| Cortex-M0 固件骨架 | 636 B flash / 184 B RAM |
-| RISC-V32 固件骨架 | 874 B flash / 188 B RAM |
-| 智能车融合固件（CYT2BL3，4 模块 + 遥测） | 1968 B flash / 340 B RAM |
+| Cortex-M0 固件骨架 | 628 B flash / 184 B RAM |
+| RISC-V32 固件骨架 | 868 B flash / 200 B RAM |
+| 智能车融合固件（CYT2BL3，4 模块 + 遥测） | 1948 B flash / 436 B RAM |
 | 调度抖动 | 0 tick |
 
 固件骨架的 184 B RAM 中，76 B 是示例演示用的 64 字节 UART 接收环及其 12 字节通道头部，
 56 B 是两个任务的 `TaskState`，28 B 是任务上下文，其余 24 B 是事件标志与调度器自身状态。
 
-这张表是**人工测量**的，因此会漂移：它曾经同时与 `README.md` 和
-`docs/ARCHITECTURE.md` 里的另一张表对不上（596 / 1434 与实际不符）。数字来自
-`tools/elfsize.ps1`，复现命令见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4；
-测试数与目标数由 CI 校验，**尺寸没有**——改动内核后请重新测量。
+这张表是**人工测量**的，而且它会漂移得很快：同一天之内它就被改了两次——先是因为
+`tools/elfsize.ps1` 把 `.data` 只算进 flash、漏算了它在 RAM 里的那份拷贝（融合固件因此
+少报了 96 B），又因为内核本身修了几个 bug。数字来自 `tools/elfsize.ps1`，复现命令见
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4；测试数与目标数由 CI 校验，
+**尺寸没有**——改动内核后请重新测量，不要相信这张表的记忆。
 
 ## 目标平台支持
 
@@ -231,3 +232,4 @@ RT1064 与 CYT4BB7 的 CM7 核三元组完全相同，因此二者共享同一�
 本项目参考了 [LibXR](https://github.com/Jiu-xiao/libxr) 与
 [XRobot](https://github.com/xrobot-org) 的架构设计（均为 Apache-2.0），
 但**未链接其运行时**；借鉴范围的说明见 [docs/FUSION.md](docs/FUSION.md) §3。
+

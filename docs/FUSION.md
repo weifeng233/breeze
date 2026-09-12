@@ -18,7 +18,7 @@
 | 语言 | Zig（freestanding） | C++20，必须编译 | C 或 Zig（`zig cc`） |
 | 调度 | comptime 任务表 + 周期栅格 | **无自己的抢占调度**（`MonitorAll` 是 1000ms 监督循环） | cyt2bl3 有槽位调度器；另两芯片没有 |
 | 内存 | 零堆、零任务栈 | 运行期 `SPSCQueue`/`Callback::Create` 会堆分配 | 无约束 |
-| 规模 | 融合固件 1434 B flash / 280 B RAM（实测） | 完整框架 | 完整 SDK + 逐飞库 |
+| 规模 | 融合固件 1948 B flash / 436 B RAM（实测） | 完整框架 | 完整 SDK + 逐飞库 |
 | 许可 | **MIT** | Apache-2.0 | GPL-3.0（逐飞库约束） |
 | 目标 | Cortex-M / RISC-V | STM32/ESP32/HPM/CH32/MSPM0/Linux/… | CYT2BL3 / CYT4BB7 / RT1064 |
 
@@ -194,12 +194,13 @@ ARMv6-M 没有 `LDREX`/`STREX`，LLVM 因此不认为任何 32 位原子是无�
 
 | 目标 | Flash | RAM | 外部依赖 |
 |---|---|---|---|
-| CYT2BL3 (Cortex-M4F) | 1968 B | 340 B | `__aeabi_memclr4` |
-| CYT4BB7 CM0+ | 1936 B | 340 B | `__aeabi_memclr4` + 软浮点 3 处 + 64 位整数 1 处 |
-| CYT4BB7 CM7F / RT1064 | 1972 B | 340 B | `__aeabi_memclr4` |
+| CYT2BL3 (Cortex-M4F) | 1948 B | 436 B | `__aeabi_memclr4` |
+| CYT4BB7 CM0+ | 1932 B | 436 B | `__aeabi_memclr4` + 软浮点 3 处 + 64 位整数 1 处 |
+| CYT4BB7 CM7F / RT1064 | 1952 B | 436 B | `__aeabi_memclr4` |
 
 全部由 picolibc 提供，**无一来自 libatomic**。（尺寸与依赖列在 2026-09 重新测量过；
-办法是把产物当字节串搜符号名，能查出"引用了什么"，查不出"没引用什么"以外的结论。）
+办法是把产物当字节串搜符号名，能查出"引用了什么"，查不出别的。RAM 一列含 `.data`
+在 RAM 中的拷贝，见 ARCHITECTURE §4 对 `tools/elfsize.ps1` 口径修正的说明。）
 
 ### 6.2 内核本体
 
@@ -210,8 +211,8 @@ ARMv6-M 没有 `LDREX`/`STREX`，LLVM 因此不认为任何 32 位原子是无�
 | `Join` / `Limiter` | 4 B / 12 B |
 | `Join.Of(T, cap)` | `cap` + `cap×sizeof(T)` + 1 B |
 | 每任务额外栈 | 0 |
-| `firmware_cortex_m.zig`（Cortex-M0） | 636 B flash / 184 B RAM |
-| `firmware_riscv.zig`（RISC-V32） | 874 B flash / 188 B RAM |
+| `firmware_cortex_m.zig`（Cortex-M0） | 628 B flash / 184 B RAM |
+| `firmware_riscv.zig`（RISC-V32） | 868 B flash / 200 B RAM |
 | 调度抖动 | 0 tick |
 
 Cortex-M0 骨架的 184 B RAM 中 76 B 是示例演示用的 UART 接收环，56 B 是两个 `TaskState`，

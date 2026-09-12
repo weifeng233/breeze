@@ -123,16 +123,18 @@ picolibc 归档里，而许多工程用 `-fno-compiler-rt` 编译 Zig 对象。
 
 | 固件 | Flash | RAM |
 |---|---|---|
-| `firmware_cortex_m.zig` → Cortex-M0 | 636 B | 184 B |
-| `firmware_cortex_m.zig` → Cortex-M4F | 700 B | 184 B |
-| `firmware_riscv.zig` → RISC-V32 | 874 B | 188 B |
-| `firmware_smartcar.zig` → CYT2BL3 (CM4F) | 1968 B | 340 B |
-| `firmware_smartcar.zig` → CYT4BB7 CM0+ | 1936 B | 340 B |
+| `firmware_cortex_m.zig` → Cortex-M0 | 628 B | 184 B |
+| `firmware_cortex_m.zig` → Cortex-M4F | 672 B | 184 B |
+| `firmware_riscv.zig` → RISC-V32 | 868 B | 200 B |
+| `firmware_smartcar.zig` → CYT2BL3 (CM4F) | 1948 B | 436 B |
+| `firmware_smartcar.zig` → CYT4BB7 CM0+ | 1932 B | 436 B |
+| `firmware_smartcar.zig` → CYT4BB7 CM7F | 1952 B | 436 B |
 
-这张表在 2026-09 重新测量时发现**已经漂移**：`TaskState` 记的是 24（加了 overrun 计数后
-是 28），Cortex-M0 骨架记的是 596/136（实际 616/184），融合固件记的是 1434/280
-（实际 1556/364）——即在上一次内核改动之后就没有再对过。测试数与目标数有 CI 校验，
-**尺寸没有**。改动内核后请按下面的命令重测，不要相信本表的记忆。
+这张表在 2026-09 重测时发现**已经漂移**：`TaskState` 记的是 24（实际 28），Cortex-M0 骨架
+记的是 596/136（当时实际 616/184），融合固件记的是 1434/280（当时实际 1556/364）——
+上一次内核改动之后就没有再对过。同一次重测还发现 `tools/elfsize.ps1` 把 `.data` 只算作
+flash，漏掉了它在 RAM 里的那份拷贝（融合固件少报 96 B），工具已修，上表是新口径下的数字。
+测试数与目标数有 CI 校验，**尺寸没有**。改动内核后请按下面的命令重测，不要相信本表的记忆。
 
 Cortex-M0 骨架的 184 B RAM 中，76 B 是示例演示用的 64 字节 UART 接收环及其 12 字节通道头部，
 56 B 是两个任务的 `TaskState`，28 B 是任务上下文，其余 24 B 是事件标志与调度器自身状态。
