@@ -194,24 +194,29 @@ ARMv6-M 没有 `LDREX`/`STREX`，LLVM 因此不认为任何 32 位原子是无�
 
 | 目标 | Flash | RAM | 外部依赖 |
 |---|---|---|---|
-| CYT2BL3 (Cortex-M4F) | 1434 B | 280 B | `__aeabi_memclr4` |
-| CYT4BB7 CM0+ | 1428 B | 280 B | `__aeabi_memclr4` + 软浮点 4 个 |
-| CYT4BB7 CM7F / RT1064 | 1434 B | 280 B | `__aeabi_memclr4` |
+| CYT2BL3 (Cortex-M4F) | 1968 B | 340 B | `__aeabi_memclr4` |
+| CYT4BB7 CM0+ | 1936 B | 340 B | `__aeabi_memclr4` + 软浮点 3 处 + 64 位整数 1 处 |
+| CYT4BB7 CM7F / RT1064 | 1972 B | 340 B | `__aeabi_memclr4` |
 
-全部由 picolibc 提供（已核对符号表），**无一来自 libatomic**。
+全部由 picolibc 提供，**无一来自 libatomic**。（尺寸与依赖列在 2026-09 重新测量过；
+办法是把产物当字节串搜符号名，能查出"引用了什么"，查不出"没引用什么"以外的结论。）
 
 ### 6.2 内核本体
 
 | 项 | 数值 |
 |---|---|
 | `Program` 状态 | 12 B，与指令条数无关 |
-| `TaskState` | 24 B |
+| `TaskState` | 28 B |
+| `Join` / `Limiter` | 4 B / 12 B |
+| `Join.Of(T, cap)` | `cap` + `cap×sizeof(T)` + 1 B |
 | 每任务额外栈 | 0 |
-| `firmware_cortex_m.zig`（Cortex-M0） | 596 B flash / 136 B RAM |
-| `firmware_riscv.zig`（RISC-V32） | 762 B flash / 136 B RAM |
+| `firmware_cortex_m.zig`（Cortex-M0） | 636 B flash / 184 B RAM |
+| `firmware_riscv.zig`（RISC-V32） | 874 B flash / 188 B RAM |
 | 调度抖动 | 0 tick |
 
-Cortex-M0 骨架的 136 B RAM 中 76 B 是示例演示用的 UART 接收环；去掉即 60 B。
+Cortex-M0 骨架的 184 B RAM 中 76 B 是示例演示用的 UART 接收环，56 B 是两个 `TaskState`，
+28 B 是任务上下文，其余 24 B 是事件标志与调度器自身状态。**以上数值与 README 的
+「实测开销」表是同一批测量**；两张表曾经各自漂移过，改动内核后请一并重测。
 
 ### 6.3 测试
 
