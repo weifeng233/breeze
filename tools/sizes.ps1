@@ -12,6 +12,12 @@
 # produced by `zig build check-targets`: those are built without `-fstrip
 # -fno-compiler-rt` and are therefore not the same bytes the table describes.
 #
+# The numbers do not depend on the machine doing the measuring, which was checked
+# rather than assumed: the same three objects built with Linux Zig 0.16.0 in a
+# container are byte-identical to the ones built here on Windows (same sha256),
+# and no host path is embedded in them. So a table measured on one machine is
+# checked on another without a per-runner baseline.
+#
 # Usage:
 #   pwsh tools/sizes.ps1           # measure, compare with README, fail on drift
 #   pwsh tools/sizes.ps1 -Show     # print what was measured, no comparison
