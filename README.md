@@ -3,7 +3,7 @@
 面向 **ARM Cortex-M** 与 **RISC-V** 裸机目标的确定性协作式任务内核，用现代 Zig 编写。
 同一份内核可以在主机上用虚拟时钟运行，因此固件逻辑能在工作站上被精确断言。
 
-> **状态**：内核与模块系统已实现。`zig build ci` 通过：**75 个单元测试**、
+> **状态**：内核与模块系统已实现。`zig build ci` 通过：**104 个单元测试**、
 > **7 个目标交叉编译**（CYT2BL3、CYT4BB7 的 CM0+ 与 CM7、RT1064 各有一个具名目标）。
 > 这两个数字由 CI 校验，不允许漂移（见 `.github/workflows/ci.yml`）。
 > C 版本算法库仍保留在 `include/`、`src/` 中作为迁移参考，**但它当前无法编译**，
@@ -22,6 +22,8 @@
   缺失的依赖、重复的提供者、拼错的配置字段都会直接编译失败，没有 YAML、没有代码生成步骤。
 - **无锁 IPC**：`Channel` 是调用者提供存储的 SPSC 环，`Topic` 是编译期主题 +
   与 LibXR 兼容的遥测帧格式，两者都不分配、不加锁。
+- **扇出与归拢**：`Join` 只数分支，`Join.Of(T, cap)` 给每个分支一个具名槽位存放结果，
+  `Limiter` 限制大批量任务的在飞窗口。三者都不依赖调度器，可从任务、ISR 或主机测试里用。
 
 ## 快速开始
 
@@ -117,7 +119,7 @@ const frame = try Attitude.pack(&buf, &value, timestamp_us);
 ## 构建
 
 ```bash
-zig build test           # 75 个单元测试
+zig build test           # 104 个单元测试
 zig build demo           # 主机虚拟时钟演示
 zig build check-targets  # 交叉编译 7 个目标
 zig build ci             # 格式检查 + 测试 + 目标编译
@@ -152,15 +154,22 @@ pwsh tools/vendor.ps1 -Dest ../my-project/lib/breeze -Check
 | 项 | 大小 |
 |---|---|
 | `Program` 状态 | 12 字节（与指令条数无关） |
-| `TaskState`（每任务） | 24 字节 |
+| `TaskState`（每任务） | 28 字节 |
 | 每任务额外栈 | 0 |
-| Cortex-M0 固件骨架 | 596 B flash / 136 B RAM |
-| RISC-V32 固件骨架 | 762 B flash / 136 B RAM |
-| 智能车融合固件（CYT2BL3，4 模块 + 遥测） | 1434 B flash / 280 B RAM |
+| `Join` / `Limiter` | 4 / 12 字节 |
+| `Join.Of(T, cap)` | `cap` 字节 + `cap`×`sizeof(T)`（如 `Join.Of(u16, 2)` = 8 字节） |
+| Cortex-M0 固件骨架 | 636 B flash / 184 B RAM |
+| RISC-V32 固件骨架 | 874 B flash / 188 B RAM |
+| 智能车融合固件（CYT2BL3，4 模块 + 遥测） | 1968 B flash / 340 B RAM |
 | 调度抖动 | 0 tick |
 
-固件骨架的 136 B RAM 中有 76 B 是示例演示用的 64 字节 UART 接收环及其 12 字节头部；
-不使用该环时是 60 B。
+固件骨架的 184 B RAM 中，76 B 是示例演示用的 64 字节 UART 接收环及其 12 字节通道头部，
+56 B 是两个任务的 `TaskState`，28 B 是任务上下文，其余 24 B 是事件标志与调度器自身状态。
+
+这张表是**人工测量**的，因此会漂移：它曾经同时与 `README.md` 和
+`docs/ARCHITECTURE.md` 里的另一张表对不上（596 / 1434 与实际不符）。数字来自
+`tools/elfsize.ps1`，复现命令见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4；
+测试数与目标数由 CI 校验，**尺寸没有**——改动内核后请重新测量。
 
 ## 目标平台支持
 
@@ -190,6 +199,12 @@ RT1064 与 CYT4BB7 的 CM7 核三元组完全相同，因此二者共享同一�
 以上是**交叉编译验证**：证明代码能为该目标编译通过。它不等于已在硬件上运行，
 真机验证情况见各模板仓库。
 
+这一点需要说清楚，因为"编译通过"曾经是假的：Zig 对**没有下游消费者**的产物会传
+`-fno-emit-bin`，编译在语义分析后就停下，于是**内联汇编从未被真正汇编过**。RISC-V 骨架
+因此一直"通过"却根本构建不出来——混进它里面的 Cortex-M 汇编只在生成目标文件时才报错。
+现在 `check-targets` 会安装产物以强制产出 `.o`。发现与修复过程见
+[docs/REVIEW.md](docs/REVIEW.md)。
+
 ## 文档
 
 | 文档 | 内容 |
@@ -197,7 +212,7 @@ RT1064 与 CYT4BB7 的 CM7 核三元组完全相同，因此二者共享同一�
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 设计决策、调度语义、中断规则、指令集、实测数据、迁移计划 |
 | [docs/FUSION.md](docs/FUSION.md) | 与 LibXR/XRobot 及 Smartcar-Template 的融合方案 |
 | [docs/LIBXR-XROBOT.md](docs/LIBXR-XROBOT.md) | LibXR/XRobot 技术调研（外部资料核对记录） |
-| [docs/REVIEW.md](docs/REVIEW.md) | 一次外部代码评审的逐条处理记录：采纳、驳回（附证据）、推迟 |
+| [docs/REVIEW.md](docs/REVIEW.md) | 评审处理记录：外部评审逐条处理（采纳/驳回附证据/推迟），以及一次全项目自审 |
 
 示例代码：
 

@@ -107,20 +107,35 @@ picolibc 归档里，而许多工程用 `-fno-compiler-rt` 编译 Zig 对象。
 | 项 | 大小 |
 |---|---|
 | `Program` 状态 | 12 字节，**与指令条数无关** |
-| `TaskState`（周期任务） | 24 字节 |
+| `TaskState`（周期任务） | 28 字节 |
 | 每任务额外栈 | **0**（共用主栈；对照 RTOS 每任务 256 B–2 KB） |
+
+**协调原语（编译期精确）**
+
+| 类型 | 大小 | 说明 |
+|---|---|---|
+| `Join` | 4 字节 | 只数分支，分支数不限 |
+| `Join.Of(T, cap)` | `cap` + `cap×sizeof(T)` + 1 | 每分支一个状态字节，`cap ≤ 32` |
+| `Join.Of(u16, 2)` | 8 字节 | 融合固件 `Boot` 用的就是这个 |
+| `Limiter` | 12 字节 | 窗口 + 游标 + 总数 |
 
 **固件占用**
 
 | 固件 | Flash | RAM |
 |---|---|---|
-| `firmware_cortex_m.zig` → Cortex-M0 | 596 B | 136 B |
-| `firmware_riscv.zig` → RISC-V32 | 762 B | 136 B |
-| `firmware_smartcar.zig` → CYT2BL3 (CM4F) | 1434 B | 280 B |
-| `firmware_smartcar.zig` → CYT4BB7 CM0+ | 1428 B | 280 B |
+| `firmware_cortex_m.zig` → Cortex-M0 | 636 B | 184 B |
+| `firmware_cortex_m.zig` → Cortex-M4F | 700 B | 184 B |
+| `firmware_riscv.zig` → RISC-V32 | 874 B | 188 B |
+| `firmware_smartcar.zig` → CYT2BL3 (CM4F) | 1968 B | 340 B |
+| `firmware_smartcar.zig` → CYT4BB7 CM0+ | 1936 B | 340 B |
 
-Cortex-M0 骨架的 136 B RAM 中，76 B 是示例演示用的 64 字节 UART 接收环及其 12 字节通道头部；
-去掉该环即为 60 B。其余为事件标志 4 B + 两个任务状态 48 B + 计数器 8 B。
+这张表在 2026-09 重新测量时发现**已经漂移**：`TaskState` 记的是 24（加了 overrun 计数后
+是 28），Cortex-M0 骨架记的是 596/136（实际 616/184），融合固件记的是 1434/280
+（实际 1556/364）——即在上一次内核改动之后就没有再对过。测试数与目标数有 CI 校验，
+**尺寸没有**。改动内核后请按下面的命令重测，不要相信本表的记忆。
+
+Cortex-M0 骨架的 184 B RAM 中，76 B 是示例演示用的 64 字节 UART 接收环及其 12 字节通道头部，
+56 B 是两个任务的 `TaskState`，28 B 是任务上下文，其余 24 B 是事件标志与调度器自身状态。
 
 复现方式：`tools/elfsize.ps1` 直接读 ELF 段表报告占用（Zig 0.16 的 `zig objdump` 尚是占位实现，
 只打印 `TODO dump elf file`）。
