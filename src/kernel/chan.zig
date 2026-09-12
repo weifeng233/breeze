@@ -29,16 +29,25 @@
 //!
 //! # Who may call what
 //!
-//! | method            | ISR | task |
-//! |-------------------|-----|------|
-//! | `pushFromIsr`     | yes | no   |
-//! | `pop`, `peek`     | no  | yes  |
-//! | `count`, `isEmpty`| yes (advisory) | yes |
+//! | method                     | ISR | task |
+//! |----------------------------|-----|------|
+//! | `pushFromIsr` / `push`     | yes | yes  |
+//! | `pop`, `peek`              | no  | yes  |
+//! | `count`, `isEmpty`         | yes (advisory) | yes |
 //!
-//! Calling `pushFromIsr` from a task would break the single-producer premise;
-//! calling `pop` from an ISR would break the single-consumer premise. Nothing
-//! enforces this at runtime - it is a structural contract, which is why it is
-//! written down here rather than checked.
+//! The real invariant is not "the ISR produces" - it is **exactly one producer
+//! and exactly one consumer, and not both on the same side**. A transmit queue
+//! has the roles the other way round: the task produces and the transmit
+//! interrupt consumes. That is the same problem with the two contexts swapped,
+//! and the same reasoning covers it, because each index still has exactly one
+//! writer.
+//!
+//! What the rule forbids is *mixing*: calling `pushFromIsr` from an ISR and
+//! `push` from a task on one ring gives it two producers. The two names exist so
+//! that a call site says which context it is on, which is precisely what a
+//! reader has to check. Nothing enforces any of this at runtime - it is a
+//! structural contract, which is why it is written down here rather than
+//! checked.
 
 const std = @import("std");
 const shared = @import("shared.zig");
@@ -95,6 +104,20 @@ pub fn Channel(comptime T: type, comptime capacity: usize) type {
         /// drop, overwrite, or count the loss. Breeze never silently discards
         /// on the caller's behalf.
         pub fn pushFromIsr(self: *Self, value: T) bool {
+            return self.pushValue(value);
+        }
+
+        /// Push one element from task context.
+        ///
+        /// The same operation as `pushFromIsr`, named for the other side: this
+        /// is what a transmit queue uses, where the task produces and an
+        /// interrupt consumes. Use one name or the other for a given ring, never
+        /// both - see "Who may call what" above.
+        pub fn push(self: *Self, value: T) bool {
+            return self.pushValue(value);
+        }
+
+        fn pushValue(self: *Self, value: T) bool {
             const next = (self.head +% 1) & mask;
             // `tail` is written by the consumer and read here, so it is shared
             // state too - not only `head`. Reading it directly would let the
@@ -102,7 +125,10 @@ pub fn Channel(comptime T: type, comptime capacity: usize) type {
             // reports "full" for ever. See the note on `tail` below.
             if (next == (shared.load(u32, &self.tail) & mask)) return false;
             self.backing[self.head & mask] = value;
-            // Publish the element before the index that reveals it.
+            // Publish the element before the index that reveals it. The volatile
+            // store is what orders the two: a non-volatile element store cannot
+            // be sunk past it, which is the property the consumer depends on
+            // when it reads the index and then the element.
             shared.store(u32, &self.head, next);
             return true;
         }
@@ -195,6 +221,13 @@ pub fn CountedChannel(comptime T: type, comptime capacity: usize) type {
             return false;
         }
 
+        /// Push one element from task context; counts the loss when full.
+        pub fn push(self: *Self, value: T) bool {
+            if (self.chan.push(value)) return true;
+            self.dropped +%= 1;
+            return false;
+        }
+
         pub fn pop(self: *Self) ?T {
             return self.chan.pop();
         }
@@ -219,6 +252,24 @@ const Fixture = struct {
     /// 1023 usable slots; see the masked-index test for why that size.
     var big: [1024]u16 = undefined;
 };
+
+test "a ring whose producer is the task round-trips" {
+    // The transmit-queue direction: the task pushes, an interrupt pops. The
+    // kernel used to document the opposite direction as the only one, which made
+    // the fusion example break the letter of its own contract.
+    var buf: [8]u8 = undefined;
+    var q = Channel(u8, 7).init(&buf);
+
+    for (0..7) |i| try std.testing.expect(q.push(@intCast(i)));
+    try std.testing.expectEqual(@as(u32, 7), q.count());
+
+    // Full, and reported as such rather than overwriting.
+    try std.testing.expect(!q.push(99));
+
+    // Drained from the consumer side, in order.
+    for (0..7) |i| try std.testing.expectEqual(@as(?u8, @intCast(i)), q.pop());
+    try std.testing.expectEqual(@as(?u8, null), q.pop());
+}
 
 test "channel starts empty and accepts up to capacity" {
     var ch = ByteChannel(31).init(&Fixture.buf31);
