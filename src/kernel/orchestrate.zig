@@ -221,6 +221,13 @@ pub const Join = struct {
         return struct {
             const Self = @This();
 
+            /// How many slots this join has.
+            ///
+            /// Exposed so that a caller which iterates its slots does not have
+            /// to repeat the number: `inline for (0..JoinType.capacity) |slot|`
+            /// keeps it in exactly one place.
+            pub const capacity = cap;
+
             /// One word per slot. No two branches share memory and no phase
             /// needs a read-modify-write, which is what makes this safe against
             /// nested interrupts where `Join` is not. See the module comment.
@@ -714,6 +721,8 @@ test "Join.Of: a struct payload survives the round trip" {
 
 test "Join.Of: the marginal cost is one state byte and one value per slot" {
     try std.testing.expectEqual(@as(usize, 1), @sizeOf(Join.SlotState));
+    try std.testing.expectEqual(@as(usize, 4), Join.Of(u16, 4).capacity);
+    try std.testing.expectEqual(@as(usize, 1), Join.Of(void, 1).capacity);
     try std.testing.expectEqual(
         4 * (@sizeOf(Join.SlotState) + @sizeOf(u16)),
         @sizeOf(Join.Of(u16, 8)) - @sizeOf(Join.Of(u16, 4)),

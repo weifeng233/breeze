@@ -277,7 +277,7 @@ const Boot = struct {
 
     pub const State = struct {
         prog: Prog = .{},
-        join: breeze.Join.Of(u16, 2) = .{},
+        join: Join = .{},
         cfg: Config = .{},
         now: Tick = 0,
         started_ms: Tick = 0,
@@ -294,6 +294,10 @@ const Boot = struct {
         /// slot it owns, so a retry never has to work out which one answered.
         pub const IMU = 0;
         pub const ESC = 1;
+
+        /// The join type, so that the slot count lives in exactly one place:
+        /// this declaration and the two names above.
+        const Join = breeze.Join.Of(u16, 2);
 
         fn startAttempt(ctx: *@This()) void {
             ctx.attempts += 1;
@@ -318,7 +322,7 @@ const Boot = struct {
         fn bothIn(ctx: *@This()) bool {
             if (!ctx.join.allDone()) {
                 if (breeze.time.elapsed(ctx.started_ms, ctx.now) < ctx.cfg.timeout_ms) return false;
-                inline for (0..2) |slot| {
+                inline for (0..Join.capacity) |slot| {
                     if (ctx.join.stateOf(slot) == .running) ctx.join.fail(slot);
                 }
             }
