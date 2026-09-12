@@ -2,10 +2,10 @@
 //!
 //! # Why these live outside the scheduler
 //!
-//! Neither `Join` nor `Limiter` knows anything about tasks, ticks or the
-//! scheduler. They are counters with a rule attached. That is deliberate: it
-//! means they can be used from an ISR, from a `Program` step, from a task, or
-//! from host tests, without the scheduler having to grow a feature.
+//! None of these knows anything about tasks, ticks or the scheduler. They are
+//! counters with a rule attached. That is deliberate: it means they can be used
+//! from an ISR, from a `Program` step, from a task, or from host tests, without
+//! the scheduler having to grow a feature.
 //!
 //! They were adopted from a sibling project (`zig-orch`, a cooperative
 //! orchestration kernel) where the same two ideas appear as `Join` and
@@ -44,8 +44,47 @@
 //! A `Join` over "branches" therefore cannot mean "spawned tasks"; it means
 //! "operations I started and will be told about". That is the useful reading
 //! here, and it needs no kernel support at all.
+//!
+//! # Which one
+//!
+//! | question                                    | type              | cost                   |
+//! |---------------------------------------------|-------------------|------------------------|
+//! | are all N branches in?                      | `Join`            | 4 bytes, any N         |
+//! | ...and what did each of them produce?       | `Join.Of(T, cap)` | `cap` bytes + `cap`×`T`|
+//! | how much of a large batch may be in flight? | `Limiter`         | 12 bytes, any N        |
+//!
+//! `Join` counts branches and never learns anything about them. `Join.Of` gives
+//! each branch a slot it can deposit a value into, which costs one state byte
+//! per slot and caps the fan-out at 32 - the point past which an array of
+//! results is what you want anyway, at which point use `Limiter` to bound the
+//! concurrency and your own array to hold the output.
+//!
+//! # Concurrency
+//!
+//! All three are built for the split Breeze is organised around: one scheduling
+//! context starts work, interrupt handlers report it finished. Two rules follow.
+//!
+//! **Register before starting.** `enter` must run before the operation that will
+//! report completion. Otherwise a completion that arrives immediately is counted
+//! against a branch the join has not been told about.
+//!
+//! **`Join` needs a critical section; `Join.Of` does not.** `Join.pending` is a
+//! read-modify-write. If two completion paths can preempt each other - two IRQs
+//! at different priorities, or an IRQ arriving in the middle of `enter` - one
+//! decrement is lost and the join never completes. With no `LDREX`/`STREX` on
+//! ARMv6-M there is no atomic counter to fall back on, so those calls must be
+//! wrapped in the HAL's `criticalEnter`/`criticalExit` unless every completion
+//! path shares one interrupt priority.
+//!
+//! `Join.Of` has no such requirement. Each slot is its own word and every phase
+//! writes it with a plain whole-value store, so two completions never touch the
+//! same memory and there is no read-modify-write to lose. This is the rule
+//! `shared.zig` states - one writer per word - applied per slot, and it is the
+//! reason to prefer `Join.Of` when the interrupt priorities are not yours to
+//! choose.
 
 const std = @import("std");
+const shared = @import("shared.zig");
 
 /// Counts outstanding branches and remembers whether any of them failed.
 ///
@@ -54,13 +93,10 @@ const std = @import("std");
 ///
 /// # It does not carry results
 ///
-/// There is no place to put a value, so a branch that produces one must write
-/// it somewhere the waiter can see - a module's `State`, a `Channel`, or a
-/// field on the caller's context. That is a real limitation and it is the same
-/// one `zig-orch` records as its highest-priority gap. It is left as-is here
-/// rather than guessed at, because the right shape depends on whether the
-/// results are homogeneous, fixed in number, and known at comptime - and a
-/// wrong guess would be worse than the omission.
+/// There is nowhere to put a value, so a branch that produces one must write it
+/// somewhere the waiter can see - a module's `State`, a `Channel`, or a field on
+/// the caller's context. When that is the shape you want, `Join.Of(T, cap)` is
+/// the same pattern with a named slot per branch.
 ///
 /// # Failure is sticky
 ///
@@ -68,6 +104,14 @@ const std = @import("std");
 /// of the `Join`. A caller that wants to retry must build a new one, which
 /// makes "did something already go wrong?" impossible to lose track of. This
 /// mirrors `Promise.all` semantics, where the first rejection decides.
+///
+/// # Concurrent completions
+///
+/// `enter` and `leave` are read-modify-writes on `pending`, so two of them that
+/// can preempt each other will lose one update - see the module comment. Guard
+/// them with the HAL's critical section when the completion paths are interrupt
+/// handlers at different priorities. `Join.Of` exists partly to avoid needing
+/// that.
 pub const Join = struct {
     pending: u16 = 0,
     failed: bool = false,
@@ -102,6 +146,240 @@ pub const Join = struct {
     /// "no branches were needed" behave the same as "all branches finished".
     pub fn allDone(self: *const Join) bool {
         return self.pending == 0;
+    }
+
+    /// What one slot of a `Join.Of` is currently doing.
+    ///
+    /// Declared here rather than inside `Of` so that every fan-out size shares
+    /// one type: `Join.Of(u16, 4).stateOf(0)` and `Join.Of(u32, 8).stateOf(3)`
+    /// hand back the same enum, and a helper can take it as a parameter.
+    pub const SlotState = enum(u8) {
+        /// Not part of the current round.
+        idle,
+        /// Registered by `enter`, not yet reported.
+        running,
+        /// Reported by `finish`; its value is readable.
+        done,
+        /// Reported by `fail`; it has no value this round.
+        failed,
+    };
+
+    /// A `Join` whose branches deposit a value each.
+    ///
+    /// `cap` slots are declared at compile time and the caller names the one it
+    /// means. The naming is the design, not a convenience: it is what lets two
+    /// interrupt handlers finish out of order without either of them carrying a
+    /// ticket, and what lets the waiter read a result by name.
+    ///
+    /// ```zig
+    /// const GYRO = 0;
+    /// const ACCEL = 1;
+    ///
+    /// var sensors: breeze.Join.Of(i16, 2) = .{};
+    ///
+    /// fn startSampling() void {
+    ///     _ = sensors.enter(GYRO);
+    ///     _ = sensors.enter(ACCEL);
+    ///     startGyro();
+    ///     startAccel();
+    /// }
+    ///
+    /// fn gyroReady(rate: i16) void { sensors.finish(GYRO, rate); }  // from an ISR
+    /// fn accelFault() void { sensors.fail(ACCEL); }
+    ///
+    /// fn useThem() void {
+    ///     if (!sensors.allDone() or sensors.anyFailed()) return;
+    ///     const rate = sensors.result(GYRO).?;
+    ///     const accel = sensors.result(ACCEL).?;
+    ///     _ = .{ rate, accel };
+    /// }
+    /// ```
+    ///
+    /// # Failure is per round
+    ///
+    /// This is the one place the semantics differ from `Join`, and it falls out
+    /// of the storage rather than being a choice: with a slot per branch there is
+    /// somewhere to reset. Entering a slot clears what the previous round left
+    /// in it, so a periodic gather reads this round's answer instead of a latch
+    /// from three rounds ago. A caller that wants "did anything ever go wrong"
+    /// keeps its own latch.
+    ///
+    /// # Slots are named, not looped over
+    ///
+    /// `enterAll` registers every slot at once, which is what a loop over
+    /// `0..cap` would have done. Naming slots individually is for the case where
+    /// branches start at different times.
+    pub fn Of(comptime T: type, comptime cap: comptime_int) type {
+        comptime {
+            if (cap < 1) @compileError("Join.Of needs at least one slot");
+            if (cap > 32) @compileError(
+                "Join.Of supports at most 32 slots; for a bigger batch use " ++
+                    "Limiter plus an array of your own",
+            );
+        }
+
+        return struct {
+            const Self = @This();
+
+            /// One word per slot. No two branches share memory and no phase
+            /// needs a read-modify-write, which is what makes this safe against
+            /// nested interrupts where `Join` is not. See the module comment.
+            state: [cap]SlotState = @splat(.idle),
+
+            /// What `finish` deposited. Valid while the slot reads `.done`;
+            /// volatile access in `result` keeps a polling waiter from caching
+            /// a value it loaded before the branch reported.
+            values: [cap]T = undefined,
+
+            /// Set when a slot index was out of range, or when a completion
+            /// arrived for a slot that was not running.
+            ///
+            /// Reported through `anyFailed` rather than by panicking: this runs
+            /// in interrupt handlers, and a join that cannot be trusted should
+            /// say so, not halt the board. Without it a caller who ignored the
+            /// rejected call would read a result that was never written.
+            misused: bool = false,
+
+            /// Register `slot` as running, clearing whatever the previous round
+            /// left in it.
+            ///
+            /// Returns false if the index is out of range or the slot is
+            /// already running, and sets `misused` either way. Ignoring the
+            /// result is survivable: the branch is then simply not part of this
+            /// round, and `anyFailed` says so.
+            pub fn enter(self: *Self, slot: u16) bool {
+                if (slot >= cap) {
+                    self.misused = true;
+                    return false;
+                }
+                if (shared.load(SlotState, &self.state[slot]) == .running) {
+                    self.misused = true;
+                    return false;
+                }
+                shared.store(SlotState, &self.state[slot], .running);
+                return true;
+            }
+
+            /// Register every slot at once: the whole fan-out in one call.
+            ///
+            /// Equivalent to `enter(i)` for each `i`, except that a slot still
+            /// running from the previous round is replaced rather than refused.
+            /// Starting a fresh round over every slot is the point of the call,
+            /// so it reports the overlap through `misused` and carries on.
+            pub fn enterAll(self: *Self) void {
+                for (&self.state) |*s| {
+                    if (shared.load(SlotState, s) == .running) self.misused = true;
+                    shared.store(SlotState, s, .running);
+                }
+            }
+
+            /// Report `slot` finished, with the value it produced.
+            ///
+            /// The value is stored before the slot reads `.done`, and both go
+            /// through `shared`, so a waiter that sees `.done` cannot be looking
+            /// at the previous round's value.
+            ///
+            /// Returns nothing on purpose. This is usually called from an ISR,
+            /// and answering "was that the last one?" costs a scan of every
+            /// slot; a waiter that wants to know polls `allDone`.
+            pub fn finish(self: *Self, slot: u16, value: T) void {
+                if (!self.canComplete(slot)) return;
+                if (T != void) shared.store(T, &self.values[slot], value);
+                shared.store(SlotState, &self.state[slot], .done);
+            }
+
+            /// Report `slot` finished without a usable value.
+            pub fn fail(self: *Self, slot: u16) void {
+                if (!self.canComplete(slot)) return;
+                shared.store(SlotState, &self.state[slot], .failed);
+            }
+
+            /// True when no slot is still running.
+            ///
+            /// Slots that were never entered do not hold it back, so a join that
+            /// registered nothing is trivially done - the same rule as `Join`.
+            pub fn allDone(self: *const Self) bool {
+                for (&self.state) |*s| {
+                    if (shared.load(SlotState, s) == .running) return false;
+                }
+                return true;
+            }
+
+            /// True when a branch failed, or when the join was used wrongly.
+            ///
+            /// Covers `misused` so that "is every slot valid?" is one question
+            /// rather than two.
+            pub fn anyFailed(self: *const Self) bool {
+                if (self.misused) return true;
+                for (&self.state) |*s| {
+                    if (shared.load(SlotState, s) == .failed) return true;
+                }
+                return false;
+            }
+
+            /// The lowest-numbered slot that reported a failure, or null.
+            ///
+            /// Null is also what comes back when `anyFailed` is true purely
+            /// because of misuse: there is no branch to name in that case.
+            pub fn failedSlot(self: *const Self) ?u16 {
+                for (&self.state, 0..) |*s, i| {
+                    if (shared.load(SlotState, s) == .failed) return @intCast(i);
+                }
+                return null;
+            }
+
+            /// How many branches have not reported yet.
+            pub fn outstanding(self: *const Self) u16 {
+                var n: u16 = 0;
+                for (&self.state) |*s| {
+                    if (shared.load(SlotState, s) == .running) n += 1;
+                }
+                return n;
+            }
+
+            /// What `slot` produced, or null if it has no value to hand back.
+            ///
+            /// Null covers all three of "still running", "failed" and "out of
+            /// range" - exactly the cases in which there is nothing to return.
+            pub fn result(self: *const Self, slot: u16) ?T {
+                if (slot >= cap) return null;
+                if (shared.load(SlotState, &self.state[slot]) != .done) return null;
+                if (T == void) return {};
+                return shared.load(T, &self.values[slot]);
+            }
+
+            /// What `slot` is doing, or null if the index is out of range.
+            pub fn stateOf(self: *const Self, slot: u16) ?SlotState {
+                if (slot >= cap) return null;
+                return shared.load(SlotState, &self.state[slot]);
+            }
+
+            /// Return every slot to `.idle`, ready for another round.
+            ///
+            /// `join = .{}` does the same thing. This exists because that
+            /// assignment does not say out loud that reusing a join is meant to
+            /// be possible.
+            pub fn reset(self: *Self) void {
+                for (&self.state) |*s| shared.store(SlotState, s, .idle);
+                self.misused = false;
+            }
+
+            /// Shared validity check for the two completion paths. Separated so
+            /// that neither of them can store anything before the check passes -
+            /// in particular so `finish` cannot mark a slot done before the
+            /// value is in it.
+            fn canComplete(self: *Self, slot: u16) bool {
+                if (slot >= cap) {
+                    self.misused = true;
+                    return false;
+                }
+                if (shared.load(SlotState, &self.state[slot]) != .running) {
+                    self.misused = true;
+                    return false;
+                }
+                return true;
+            }
+        };
     }
 };
 
@@ -221,6 +499,259 @@ test "Join: enter after the last leave is not lost" {
 
     join.enter();
     try std.testing.expect(!join.allDone());
+}
+
+// --- Join.Of ---------------------------------------------------------------
+
+test "Join.Of: a result lands in the slot it was sent to" {
+    var join: Join.Of(u16, 3) = .{};
+    join.enterAll();
+    try std.testing.expect(!join.allDone());
+    try std.testing.expectEqual(@as(u16, 3), join.outstanding());
+
+    // Out of order, and one of them is zero - which must not read as "no
+    // value", the way a bare sentinel would.
+    join.finish(2, 0x0202);
+    join.finish(0, 0x0000);
+    try std.testing.expect(!join.allDone());
+    try std.testing.expectEqual(@as(u16, 1), join.outstanding());
+
+    join.finish(1, 0x0101);
+    try std.testing.expect(join.allDone());
+    try std.testing.expectEqual(@as(u16, 0), join.outstanding());
+    try std.testing.expect(!join.anyFailed());
+
+    try std.testing.expectEqual(@as(?u16, 0x0000), join.result(0));
+    try std.testing.expectEqual(@as(?u16, 0x0101), join.result(1));
+    try std.testing.expectEqual(@as(?u16, 0x0202), join.result(2));
+}
+
+test "Join.Of: slots that were never entered do not hold the join open" {
+    var join: Join.Of(u8, 4) = .{};
+    _ = join.enter(1);
+    _ = join.enter(3);
+    try std.testing.expectEqual(@as(u16, 2), join.outstanding());
+
+    join.finish(3, 9);
+    try std.testing.expect(!join.allDone()); // slot 1 is still out
+    join.finish(1, 7);
+    try std.testing.expect(join.allDone());
+
+    try std.testing.expectEqual(Join.SlotState.idle, join.stateOf(0).?);
+    try std.testing.expectEqual(@as(?u8, null), join.result(0));
+    try std.testing.expectEqual(@as(?u8, null), join.result(2));
+    try std.testing.expectEqual(@as(?u8, 7), join.result(1));
+}
+
+test "Join.Of: a failed branch has no value without hiding the others" {
+    var join: Join.Of(i16, 3) = .{};
+    join.enterAll();
+
+    join.fail(1);
+    join.finish(0, -42);
+    join.finish(2, 42);
+
+    try std.testing.expect(join.allDone());
+    try std.testing.expect(join.anyFailed());
+    try std.testing.expectEqual(@as(?u16, 1), join.failedSlot());
+    try std.testing.expectEqual(@as(?i16, null), join.result(1));
+    try std.testing.expectEqual(@as(?i16, -42), join.result(0));
+    try std.testing.expectEqual(@as(?i16, 42), join.result(2));
+}
+
+test "Join.Of: failure is per round where Join's is for the lifetime" {
+    // The documented divergence, both halves of it.
+    var counted = Join{};
+    counted.enter();
+    _ = counted.leave(false);
+    counted.enter();
+    _ = counted.leave(true);
+    try std.testing.expect(counted.failed); // sticky, by design
+
+    var slotted: Join.Of(u8, 1) = .{};
+    _ = slotted.enter(0);
+    slotted.fail(0);
+    try std.testing.expect(slotted.anyFailed());
+
+    _ = slotted.enter(0);
+    slotted.finish(0, 5);
+    try std.testing.expect(!slotted.anyFailed()); // this round is clean
+    try std.testing.expectEqual(@as(?u16, null), slotted.failedSlot());
+    try std.testing.expectEqual(@as(?u8, 5), slotted.result(0));
+}
+
+test "Join.Of: reopening a slot discards the previous round's value" {
+    var join: Join.Of(u8, 1) = .{};
+    _ = join.enter(0);
+    join.finish(0, 11);
+    try std.testing.expectEqual(@as(?u8, 11), join.result(0));
+
+    _ = join.enter(0);
+    // The old value must not be readable while the new branch is still out.
+    try std.testing.expectEqual(Join.SlotState.running, join.stateOf(0).?);
+    try std.testing.expectEqual(@as(?u8, null), join.result(0));
+}
+
+test "Join.Of: an out-of-range slot is reported, not obeyed" {
+    var join: Join.Of(u8, 2) = .{};
+    try std.testing.expect(!join.enter(2));
+    try std.testing.expect(join.anyFailed());
+    try std.testing.expectEqual(@as(?u16, null), join.failedSlot()); // no branch to blame
+    try std.testing.expect(join.allDone()); // and nothing was registered
+    try std.testing.expectEqual(@as(?u8, null), join.result(2));
+    try std.testing.expectEqual(@as(?Join.SlotState, null), join.stateOf(2));
+
+    join.finish(2, 1);
+    join.fail(9);
+    try std.testing.expectEqual(@as(u16, 0), join.outstanding());
+}
+
+test "Join.Of: completing a slot that was never entered is reported" {
+    var join: Join.Of(u8, 2) = .{};
+    join.finish(1, 3);
+
+    try std.testing.expect(join.anyFailed());
+    try std.testing.expectEqual(@as(?u8, null), join.result(1));
+    try std.testing.expectEqual(Join.SlotState.idle, join.stateOf(1).?);
+    try std.testing.expect(join.allDone());
+}
+
+test "Join.Of: entering a running slot is reported and changes nothing" {
+    var join: Join.Of(u8, 2) = .{};
+    try std.testing.expect(join.enter(0));
+    try std.testing.expect(!join.misused);
+
+    try std.testing.expect(!join.enter(0)); // already out
+    try std.testing.expect(join.misused);
+    try std.testing.expectEqual(@as(u16, 1), join.outstanding());
+
+    join.finish(0, 1);
+    try std.testing.expect(join.allDone());
+}
+
+test "Join.Of: enterAll replaces a slot left running by the previous round" {
+    var join: Join.Of(u8, 2) = .{};
+    _ = join.enter(0);
+    join.enterAll(); // slot 0 was still out
+    try std.testing.expect(join.misused);
+    try std.testing.expectEqual(@as(u16, 2), join.outstanding());
+
+    join.finish(0, 1);
+    join.finish(1, 2);
+    try std.testing.expect(join.allDone());
+
+    join.reset();
+    try std.testing.expect(!join.misused);
+    try std.testing.expectEqual(@as(?u8, null), join.result(0));
+    try std.testing.expect(join.allDone());
+}
+
+test "Join.Of: a join with no payload still names its branches" {
+    // `T = void` is the counting join that can say *which* branch failed.
+    var join: Join.Of(void, 3) = .{};
+    join.enterAll();
+    join.finish(0, {});
+    join.fail(1);
+    join.finish(2, {});
+
+    try std.testing.expect(join.allDone());
+    try std.testing.expect(join.anyFailed());
+    try std.testing.expectEqual(@as(?u16, 1), join.failedSlot());
+    try std.testing.expect(join.result(0) != null);
+    try std.testing.expect(join.result(1) == null);
+}
+
+test "Join.Of: a waiter can poll while the branches report" {
+    // The shape a `Program` uses: a step that answers "not yet" until every
+    // branch is in, with completions landing between polls as an ISR's would.
+    var join: Join.Of(u8, 2) = .{};
+    join.enterAll();
+
+    var polls: u32 = 0;
+    while (!join.allDone()) {
+        polls += 1;
+        switch (polls) {
+            1 => join.finish(1, 0xB1),
+            2 => join.finish(0, 0xA0),
+            else => {},
+        }
+        try std.testing.expect(polls < 8);
+    }
+
+    try std.testing.expectEqual(@as(u32, 2), polls);
+    try std.testing.expectEqual(@as(?u8, 0xA0), join.result(0));
+    try std.testing.expectEqual(@as(?u8, 0xB1), join.result(1));
+}
+
+test "Join.Of: a fan-out that reports values" {
+    var adc: Join.Of(u16, 4) = .{};
+    adc.enterAll();
+    adc.finish(3, 4003);
+    adc.finish(0, 4000);
+    adc.finish(2, 4002);
+    adc.finish(1, 4001);
+
+    try std.testing.expect(adc.allDone());
+    try std.testing.expect(!adc.anyFailed());
+
+    var sum: u32 = 0;
+    inline for (0..4) |i| sum += (adc.result(i) orelse 0);
+    try std.testing.expectEqual(@as(u32, 16006), sum);
+}
+
+test "Join.Of: a struct payload survives the round trip" {
+    const Sample = struct { raw: u16, at: u32 };
+
+    var join: Join.Of(Sample, 2) = .{};
+    join.enterAll();
+    join.finish(1, .{ .raw = 0x1234, .at = 99 });
+    join.finish(0, .{ .raw = 0xABCD, .at = 1 });
+
+    try std.testing.expectEqual(@as(u16, 0x1234), join.result(1).?.raw);
+    try std.testing.expectEqual(@as(u32, 99), join.result(1).?.at);
+    try std.testing.expectEqual(@as(u16, 0xABCD), join.result(0).?.raw);
+}
+
+test "Join.Of: the marginal cost is one state byte and one value per slot" {
+    try std.testing.expectEqual(@as(usize, 1), @sizeOf(Join.SlotState));
+    try std.testing.expectEqual(
+        4 * (@sizeOf(Join.SlotState) + @sizeOf(u16)),
+        @sizeOf(Join.Of(u16, 8)) - @sizeOf(Join.Of(u16, 4)),
+    );
+}
+
+test "the counter hazard that Join.Of is shaped to avoid" {
+    // This is not a bug report - it is the executable form of what the module
+    // comment says, and the reason `Join.Of` spends a byte per branch instead
+    // of a counter. Two handlers, each loading the counter and storing its own
+    // decremented copy, lose one of the two decrements:
+    var join = Join{};
+    join.enter();
+    join.enter();
+
+    const from_isr_a = join.pending; // A loads 2
+    const from_isr_b = join.pending; // B preempts and also loads 2
+    join.pending = from_isr_a - 1; // A stores 1
+    join.pending = from_isr_b - 1; // B stores 1; A's decrement is gone
+
+    try std.testing.expectEqual(@as(u16, 1), join.pending);
+    try std.testing.expect(!join.allDone()); // and it stays that way
+
+    // The slot version has no shared word for the two to race over: each
+    // completion writes only its own slot, so both orders agree exactly.
+    var forwards: Join.Of(u8, 2) = .{};
+    forwards.enterAll();
+    forwards.finish(0, 1);
+    forwards.finish(1, 2);
+
+    var backwards: Join.Of(u8, 2) = .{};
+    backwards.enterAll();
+    backwards.finish(1, 2);
+    backwards.finish(0, 1);
+
+    try std.testing.expect(forwards.allDone() and backwards.allDone());
+    try std.testing.expectEqual(forwards.result(0), backwards.result(0));
+    try std.testing.expectEqual(forwards.result(1), backwards.result(1));
 }
 
 test "Limiter never exceeds its window" {
