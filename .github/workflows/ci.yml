@@ -46,11 +46,16 @@ jobs:
       # job prints it and asserts the size. A silently shrinking list is how a
       # target quietly stops being verified. The count is stable across cached
       # and uncached runs: the summary names each object either way.
+      #
+      # The `^+- ` anchor matters. Each object is also installed so that the
+      # binary is actually emitted (`-fno-emit-bin` would otherwise stop the
+      # compile after semantic analysis), and the summary repeats the compile
+      # line under its install step. Without the anchor this counts 14.
       - name: Confirm every target was compiled
         run: |
           out=$(zig build check-targets --summary all 2>&1)
           echo "$out"
-          count=$(printf '%s\n' "$out" | grep -c 'compile obj breeze_fw_')
+          count=$(printf '%s\n' "$out" | grep -c '^+- compile obj breeze_fw_')
           echo "compiled $count firmware objects"
           test "$count" -eq 7
 
@@ -70,7 +75,7 @@ jobs:
 
       - name: README's target count must match reality
         run: |
-          actual=$(zig build check-targets --summary all 2>&1 | grep -c 'compile obj breeze_fw_')
+          actual=$(zig build check-targets --summary all 2>&1 | grep -c '^+- compile obj breeze_fw_')
           claimed=$(grep -o '\*\*[0-9]* 个目标交叉编译\*\*' README.md | head -1 | grep -o '[0-9]*')
           echo "README claims: $claimed   actual: $actual"
           test -n "$claimed" || { echo "could not parse README's claim"; exit 1; }

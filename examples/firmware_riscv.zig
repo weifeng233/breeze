@@ -96,6 +96,24 @@ export fn machineExternalTrap() callconv(.c) void {
     sched.events.setFromIsr(EVT_UART_RX);
 }
 
+/// Give every piece of the RISC-V HAL's inline assembly a call site.
+///
+/// Each of these is also reached from `breeze_main` or the scheduler today. This
+/// exists so that "every `csr*` instruction in the HAL is assembled somewhere"
+/// is a claim with one place to look, and so that deleting a call above cannot
+/// quietly take the verification with it. `export` forces the emission - see the
+/// same function in `firmware_cortex_m.zig` for why that matters.
+///
+/// It is never called: an exported function is emitted whether or not anything
+/// references it, which is the whole point.
+export fn halAsmCoverage() callconv(.c) void {
+    hal.criticalEnter();
+    hal.criticalExit();
+    hal.enableTimerInterrupt();
+    hal.enableExternalInterrupt();
+    hal.idle();
+}
+
 /// A trap vector table. `mtvec` requires 4-byte alignment, and in vectored mode
 /// one entry per exception cause. Zig's grammar puts `align` before
 /// `linksection`.

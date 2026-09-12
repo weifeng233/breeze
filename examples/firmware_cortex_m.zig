@@ -116,6 +116,24 @@ export fn HardFault_Handler() callconv(.c) void {
     while (true) {}
 }
 
+/// Give every piece of the Cortex-M HAL's inline assembly a call site.
+///
+/// `criticalEnter`, `criticalExit` and `idle` are reached through the scheduler.
+/// The save/restore pair is not used by the kernel at all, so without this the
+/// `mrs primask` / `msr primask` in them would never be assembled, and a typo
+/// would survive every build until someone nested a critical section.
+///
+/// `export` is what does the work: it forces this function, and therefore the
+/// assembly inlined into it, to be emitted. `zig build check-targets` compiles
+/// this file for Cortex-M0 and M4F *with emission enabled*, so a bad mnemonic
+/// here is a build failure rather than a discovery. See `src/hal/cortex_m.zig`
+/// for why this is not done by exporting the HAL functions themselves.
+export fn halAsmCoverage() callconv(.c) u32 {
+    const saved = hal.criticalEnterSaved();
+    hal.criticalExitRestore(saved);
+    return saved;
+}
+
 // --- the superloop ---------------------------------------------------------
 
 /// Called from the reset handler after `.data`/`.bss` initialisation.

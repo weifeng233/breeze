@@ -201,24 +201,28 @@ pub inline fn criticalExitRestore(saved: u32) void {
         : .{ .memory = true });
 }
 
-/// C-callable wrapper for `criticalEnterSaved`.
-///
-/// Present for two reasons: C code in a mixed project can nest critical
-/// sections, and - more importantly for this file - an exported function is
-/// emitted unconditionally, so the save/restore assembly above is always
-/// assembled and therefore always checked.
-///
-/// A bare `comptime { _ = &criticalEnterSaved; }` reference does **not**
-/// achieve that: it was tried, and a deliberately corrupted mnemonic still
-/// compiled, proving the inline assembly had never been analysed.
-export fn breeze_critical_enter_saved() callconv(.c) u32 {
-    return criticalEnterSaved();
-}
-
-/// C-callable wrapper for `criticalExitRestore`.
-export fn breeze_critical_exit_restore(saved: u32) callconv(.c) void {
-    criticalExitRestore(saved);
-}
+// `criticalEnterSaved` and `criticalExitRestore` above have no call site in the
+// kernel, and an inline function with no call site is never analysed - so a typo
+// in their assembly would survive every build until the day a project nested a
+// critical section.
+//
+// They used to be re-exported from this file as `breeze_critical_enter_saved` /
+// `breeze_critical_exit_restore` for exactly that reason, because an `export` is
+// emitted unconditionally. That worked, and it cost more than it was worth: an
+// `export` in a file that is in a module's import graph is emitted for *every*
+// target that module is built for, so this file's Cortex-M assembly was pulled
+// into RISC-V builds too. Once `zig build check-targets` started emitting
+// objects instead of stopping after semantic analysis, it turned into a hard
+// failure of `examples/firmware_riscv.zig`.
+//
+// The job moved to `halAsmCoverage` in `examples/firmware_cortex_m.zig`: an
+// exported function that calls both of these, in a file compiled only for
+// Cortex-M. The verification is now visible where it happens instead of being a
+// side effect of a linkage decision.
+//
+// Note that a bare `comptime { _ = &criticalEnterSaved; }` does **not** work as
+// a substitute. That was tried, and a deliberately corrupted mnemonic still
+// compiled, proving the inline assembly had never been analysed.
 
 /// Wait for an interrupt: the kernel calls this when nothing is runnable.
 ///

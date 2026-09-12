@@ -148,6 +148,21 @@ pub fn build(b: *std.Build) void {
             }),
         });
         check_step.dependOn(&fw.step);
+
+        // An artifact that nothing consumes is compiled with `-fno-emit-bin`,
+        // which stops the compiler after semantic analysis. That quietly
+        // weakens this whole step: it accepts a target whose code cannot
+        // actually be *emitted*. It was not theoretical - the RISC-V skeleton
+        // passed this check for as long as it existed while being unbuildable,
+        // because the Cortex-M assembly that leaked into it only fails at
+        // codegen. Installing the object forces the binary to be emitted, so
+        // "compiles for this target" now means all the way to an object file.
+        const emit = b.addInstallFileWithDir(
+            fw.getEmittedBin(),
+            .{ .custom = "fwcheck" },
+            b.fmt("{s}.o", .{t.name}),
+        );
+        check_step.dependOn(&emit.step);
     }
 
     // --- formatting / lint shortcuts ---------------------------------------
