@@ -3,10 +3,27 @@
 //! A 32-bit mask, one word, no allocation. The concurrency contract is
 //! asymmetric on purpose:
 //!
-//!   * `setFromIsr` is called only from interrupt context and is the sole
-//!     writer on that path, so a bare read-modify-write is safe.
+//!   * `setFromIsr` is called only from interrupt context, where masking is not
+//!     available portably, so it is a bare read-modify-write. That is safe
+//!     under one condition, stated below.
 //!   * `raise` and `clear` run in task context and therefore mask interrupts,
 //!     because an ISR firing mid read-modify-write would otherwise be lost.
+//!
+//! # The condition on `setFromIsr`: one interrupt priority
+//!
+//! **Every interrupt that raises flags must run at the same priority.** A bare
+//! read-modify-write cannot be atomic on ARMv6-M (no `LDREX`/`STREX`), so if a
+//! higher-priority ISR preempts a lower-priority one between the load and the
+//! store, the lower one writes back the value it loaded and the higher one's
+//! flag is gone - permanently, for a source that raises it once. Every ISR
+//! writes the *same* word, so this is the normal case, not an exotic one.
+//!
+//! The alternative was masking interrupts inside the handler, which works on
+//! Cortex-M (`cpsid i` nests safely inside an ISR) but not on RISC-V, where
+//! `criticalExit` sets MIE unconditionally and would therefore enable
+//! interrupts inside a trap handler. A shared priority is the one rule that
+//! holds on both backends, and it is what most firmware does by default.
+//! `hal.zig` states it as part of the interrupt-handler contract.
 //!
 //! # Triggers are level-based, and nothing clears itself
 //!
@@ -80,9 +97,15 @@ pub const EventFlags = struct {
 
     /// Raise flags from interrupt context.
     ///
-    /// Safe without a critical section because the ISR is the only writer on
-    /// this path; task-context clears are protected by `clear`. The
-    /// read-modify-write is still split across two volatile accesses so that
+    /// **Every interrupt that calls this must run at the same priority** - see
+    /// the module comment. The read-modify-write below cannot be made atomic on
+    /// ARMv6-M, and an ISR that preempts another one between the load and the
+    /// store loses the preempting interrupt's flag for good.
+    ///
+    /// Task-context raises are not affected: `raise` masks interrupts around its
+    /// own read-modify-write.
+    ///
+    /// The read-modify-write is still split across two volatile accesses so that
     /// neither half can be optimised away.
     pub inline fn setFromIsr(self: *EventFlags, mask: u32) void {
         shared.store(u32, &self.bits, shared.load(u32, &self.bits) | mask);

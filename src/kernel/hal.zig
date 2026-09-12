@@ -22,9 +22,17 @@
 //! # Optional declarations
 //!
 //! ```zig
-//! pub fn idle() void;                // called when no task is runnable
-//! pub fn watchdogKick() void;
+//! pub fn idle() void;                // called when no task was due this pass
+//! pub fn watchdogKick() void;        // called once per pass
 //! ```
+//!
+//! `idle` is called when a whole pass found no task due. A task suspended
+//! mid-sequence is due on *every* pass, so it keeps the loop awake and `wfi`
+//! does not happen until it finishes. That is deliberate: the alternative -
+//! sleeping whenever the only thing a pass did was re-poll a suspended task -
+//! would slow every multi-pass sequence down to the interrupt rate, which is a
+//! far worse trade than the power it saves. A design that wants to sleep while
+//! waiting should wait in an interrupt and let the task return `.finished`.
 //!
 //! # Rules for interrupt handlers
 //!
@@ -34,8 +42,23 @@
 //!   3. set event flags with `EventFlags.setFromIsr`.
 //!
 //! An ISR must never call the scheduler, allocate, format strings, or invoke
-//! any kernel entry point. `setFromIsr` is safe because the ISR is the only
-//! writer; readers clear flags inside a critical section.
+//! any kernel entry point. Readers of event flags clear them inside a critical
+//! section.
+//!
+//! ## Every flag-raising interrupt runs at the same priority
+//!
+//! `setFromIsr` is a read-modify-write, and ARMv6-M has no
+//! load-exclusive/store-exclusive to make it atomic. All ISRs write the *same*
+//! word, so if two of them can preempt each other, the preempted one writes
+//! back the value it loaded before the preemption and the other's flag is lost
+//! for good.
+//!
+//! This is a contract rather than a check because interrupt priorities live in
+//! NVIC/mip registers at run time, where the kernel cannot see them. Masking
+//! inside the handler was the alternative and it is not portable: `cpsid i`
+//! nests safely inside a Cortex-M ISR, but RISC-V's `criticalExit` sets MIE
+//! unconditionally and would enable interrupts inside a trap handler. A shared
+//! priority is the one rule that holds on both backends.
 
 const std = @import("std");
 const Tick = @import("tick.zig").Tick;

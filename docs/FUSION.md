@@ -315,7 +315,7 @@ pub const BoardHal = struct {
 | Zig 对象 Flash | 944 B | 811 B | −133 B |
 | 整机 `.bss` | 3624 B | **3288 B** | −336 B |
 | 整机 Flash | 153 952 B | 153 776 B | −176 B |
-| Zig 对象中的 `wfi` | 0 处 | 2 处 | 空闲不再忙等 |
+| Zig 对象中的 `wfi` | 0 处 | 2 处 | 无任务到期时不再忙等（见下） |
 
 Flash 那一列对 Breeze 偏保守，但只在**对象文件**那一行：Breeze 还额外带了两个诊断导出
 （`zig_worst_lateness`、`zig_grid_resyncs`），原版本没有对应功能。整机那一行不受影响——
@@ -326,6 +326,14 @@ S1 期间实测确认，链接脚本只 `KEEP` 了 `.intvec` / `.init` / `.fini`
 原调度器占的 400 B 就是 `[16]?Task` 常驻数组。Breeze 三个任务的调度状态名义上是 84 B
 （`TaskState` 24 B × 3 + 事件标志 4 + 两个计数器 8），实际只发出 72 B，
 因为 `TaskState.runs` 在固件里只写不读，被优化器删掉了（3 × 4 = 12 B，正好是差额）。
+
+**"空闲不再忙等"这句话的边界**：`wfi` 只在**没有任何任务到期**的那一趟执行。
+一个挂起中的任务（例如 `Program` 停在 `wait_event` 上）每一趟都算到期，因此循环
+会一直转下去，直到它结束——此时并没有 `wfi`。这是 2026-09 自审时确认并**有意保留**的
+取舍：如果改成"只要这趟只是在重新轮询挂起任务就睡眠"，多趟序列的推进速度会从
+"每个 pass 一次"降到"每个中断一次"（tick 频率），代价比省下的电更大。
+想边等边睡的写法是：让中断去等，任务直接返回 `.finished`。详见
+[REVIEW.md](REVIEW.md) §22b 与 `src/kernel/hal.zig` 的 `idle` 契约。
 
 **验证深度**：`scripts/build_zig.ps1` 出对象 → 完整 `make` 链接出
 `cyt2bl3.elf/.hex/.bin` → 最终镜像里有 `zig_setup`/`zig_loop`/`pit0_isr_callback`/

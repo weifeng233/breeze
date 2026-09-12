@@ -438,6 +438,14 @@ fn micros(now: Tick) u64 {
 // The complete ISR vocabulary of this application: advance time, push a byte,
 // raise a flag, complete a gather slot. No module code, no allocation, no
 // formatting.
+//
+// UART0_RX is the only handler here that raises an event flag, so the
+// "flag-raising interrupts share one priority" rule in `breeze.kernel.hal` is
+// satisfied by there being only one of them. The moment a second handler calls
+// `setFromIsr`, both must be assigned the same NVIC priority - they cannot
+// preempt each other, or the preempted one writes back a stale word and the
+// other's flag is lost. The two handlers below that complete gather slots are
+// not affected: `Join.Of` gives each branch its own word.
 
 export fn SysTick_Handler() callconv(.c) void {
     hal.tickIsr();

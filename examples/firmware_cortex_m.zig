@@ -99,6 +99,11 @@ var sched = Sched.init();
 //
 // The complete ISR contract: advance time, fill a ring, raise a flag. No
 // scheduler call, no allocation, no formatting.
+//
+// UART0 is the only handler that raises an event flag. A second one would have
+// to be given the same NVIC priority as this one: `setFromIsr` is a
+// read-modify-write and two flag-raising interrupts that can preempt each other
+// lose one of the two flags. See `breeze.kernel.hal`.
 
 export fn SysTick_Handler() callconv(.c) void {
     hal.tickIsr();

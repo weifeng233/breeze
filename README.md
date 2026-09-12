@@ -167,11 +167,11 @@ pwsh tools/vendor.ps1 -Dest ../my-project/lib/breeze -Check
 固件骨架的 184 B RAM 中，76 B 是示例演示用的 64 字节 UART 接收环及其 12 字节通道头部，
 56 B 是两个任务的 `TaskState`，28 B 是任务上下文，其余 24 B 是事件标志与调度器自身状态。
 
-这张表是**人工测量**的，而且它会漂移得很快：同一天之内它就被改了两次——先是因为
-`tools/elfsize.ps1` 把 `.data` 只算进 flash、漏算了它在 RAM 里的那份拷贝（融合固件因此
-少报了 96 B），又因为内核本身修了几个 bug。数字来自 `tools/elfsize.ps1`，复现命令见
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4；测试数与目标数由 CI 校验，
-**尺寸没有**——改动内核后请重新测量，不要相信这张表的记忆。
+这张表**由 CI 校验**：`pwsh tools/sizes.ps1` 按 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4
+里那条命令重新编译三个镜像、用 `tools/elfsize.ps1` 测量、再逐项与本表比对，不一致就让 CI 红。
+加这道检查是因为它漂移得比想象中快：同一天里改过三次——一次是量具本身错了
+（`.data` 只算进 flash、漏算了它在 RAM 里的那份拷贝，融合固件少报 96 B），两次是内核改动。
+`zig build ci` 不含这道检查（它不是纯 Zig 的），由 CI workflow 单独执行。
 
 ## 目标平台支持
 

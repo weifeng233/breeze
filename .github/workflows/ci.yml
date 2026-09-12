@@ -80,3 +80,11 @@ jobs:
           echo "README claims: $claimed   actual: $actual"
           test -n "$claimed" || { echo "could not parse README's claim"; exit 1; }
           test "$actual" = "$claimed"
+
+      # The cost table is a measurement, and measurements rot: it had drifted in
+      # three separate documents before anyone noticed, twice because the kernel
+      # changed and once because the measuring tool itself under-reported RAM.
+      # The script rebuilds the three images with the flags docs/ARCHITECTURE.md
+      # documents, measures them with tools/elfsize.ps1, and compares each row.
+      - name: README's cost table must match the images
+        run: pwsh -NoProfile -File tools/sizes.ps1
