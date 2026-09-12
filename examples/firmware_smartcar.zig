@@ -22,9 +22,8 @@ const Step = breeze.Step;
 
 // --- events -----------------------------------------------------------------
 
-const EVT_IMU_READY: u32 = 1 << 0;
-const EVT_UART_RX: u32 = 1 << 1;
-const EVT_TX_DONE: u32 = 1 << 2;
+const EVT_UART_RX: u32 = 1 << 0;
+const EVT_TX_DONE: u32 = 1 << 1;
 
 // --- topics -----------------------------------------------------------------
 
@@ -201,7 +200,7 @@ const Uplink = struct {
         .hardware = &.{"uart0"},
         .provides = &.{"telemetry"},
         .publishes = &.{"health"},
-        .period_ms = 0, // event driven: wake on EVT_UART_RX
+        .period_ms = 0, // 0 = polled on every pass; the ring is drained often
         .stack_hint = 128,
     };
 
@@ -254,67 +253,125 @@ const Uplink = struct {
 
 // --- module: bootstrap sequence --------------------------------------------
 //
-// Sequential startup logic - wait for the IMU to answer, retry, then release
-// the motors - written as a comptime program rather than a state machine or a
-// blocking delay loop.
+// Sequential startup logic - bring two pieces of hardware up at the same time,
+// retry, then release the motors - written as a comptime program rather than a
+// state machine or a blocking delay loop.
 
 const Boot = struct {
     pub const manifest = breeze.Manifest{
         .name = "Boot",
-        .description = "Waits for the IMU to come up, then enables the chassis",
+        .description = "Brings the IMU and the ESC up together, then enables the chassis",
         .depends = &.{"imu"},
+        .hardware = &.{"esc0"},
         .provides = &.{"booted"},
-        .period_ms = 0,
+        .period_ms = 0, // 0 = polled on every scheduler pass
         .stack_hint = 48,
     };
 
-    pub const Config = struct { timeout_ms: u32 = 250 };
+    pub const Config = struct {
+        /// How long both peripherals have to answer before they are written off.
+        timeout_ms: u32 = 250,
+        /// How many times the whole gather is retried before giving up.
+        attempts_max: u32 = 3,
+    };
 
     pub const State = struct {
         prog: Prog = .{},
+        join: breeze.Join.Of(u16, 2) = .{},
+        cfg: Config = .{},
         now: Tick = 0,
+        started_ms: Tick = 0,
         attempts: u32 = 0,
-        ok: bool = false,
 
-        fn onAttempt(ctx: *@This()) void {
+        /// Null until the sequence settles, then whether it succeeded.
+        ///
+        /// The latch is not optional: a `Program` resets to instruction 0 when
+        /// it finishes, so without it the boot sequence would start over on
+        /// every later pass.
+        outcome: ?bool = null,
+
+        /// The two branches, named once. Each hardware handler completes the
+        /// slot it owns, so a retry never has to work out which one answered.
+        pub const IMU = 0;
+        pub const ESC = 1;
+
+        fn startAttempt(ctx: *@This()) void {
             ctx.attempts += 1;
+            ctx.started_ms = ctx.now;
+            // Clearing first is what makes a retry a *new* round: a slot left
+            // failed by the previous attempt would otherwise keep the join
+            // failed even once every branch had answered.
+            ctx.join.reset();
+            // Register both slots before starting either transfer, or a
+            // completion that arrives immediately has nowhere to land.
+            ctx.join.enterAll();
+            // imu0.configure(); esc0.selfTest();
+        }
+
+        /// The gather's condition, evaluated on every pass until it says stop.
+        ///
+        /// The timeout lives here rather than in a `wait_event_timeout`, because
+        /// what is being waited on is not one flag. A branch that has not
+        /// reported when the budget is gone is not going to - and naming slots
+        /// is what makes saying so a one-liner. There is no way to fail *the
+        /// missing branch* of a plain counter.
+        fn bothIn(ctx: *@This()) bool {
+            if (!ctx.join.allDone()) {
+                if (breeze.time.elapsed(ctx.started_ms, ctx.now) < ctx.cfg.timeout_ms) return false;
+                inline for (0..2) |slot| {
+                    if (ctx.join.stateOf(slot) == .running) ctx.join.fail(slot);
+                }
+            }
+            return true;
+        }
+
+        fn settled(ctx: *@This()) bool {
+            return ctx.outcome != null;
+        }
+        fn degraded(ctx: *@This()) bool {
+            return ctx.join.anyFailed();
+        }
+        fn mayRetry(ctx: *@This()) bool {
+            return ctx.attempts < ctx.cfg.attempts_max;
         }
         fn onOk(ctx: *@This()) void {
-            ctx.ok = true;
+            ctx.outcome = true;
         }
         fn onFail(ctx: *@This()) void {
-            ctx.ok = false;
-        }
-        fn canRetry(ctx: *@This()) bool {
-            return ctx.attempts < 3;
+            ctx.outcome = false;
         }
 
         const instrs = [_]breeze.Instr(@This()){
-            // 0: an attempt
-            .{ .call = onAttempt },
-            // 1: wait for the IMU, bounded
-            .{ .wait_event_timeout = .{ .mask = EVT_IMU_READY, .timeout_ms = 250 } },
-            // 2: got it -> success arm at 6
-            .{ .branch_event = 6 },
-            // 3: not yet, retry if attempts remain
-            .{ .branch_if = .{ .pred = canRetry, .target = 0 } },
-            // 4: out of attempts
-            .{ .call = onFail },
-            // 5: skip the success arm
-            .{ .jump = 7 },
-            // 6
+            // 0: the sequence runs once, so the first thing it does is check
+            //    whether it already has.
+            .{ .branch_if = .{ .pred = settled, .target = 8 } },
+            // 1
+            .{ .call = startAttempt },
+            // 2: re-polled every pass until both branches are in, or the
+            //    attempt times out and its stragglers are failed
+            .{ .call_until = bothIn },
+            // 3: anything missing?
+            .{ .branch_if = .{ .pred = degraded, .target = 6 } },
+            // 4
             .{ .call = onOk },
+            // 5: success, so skip the retry arms
+            .{ .jump = 8 },
+            // 6: retry the whole gather if attempts remain
+            .{ .branch_if = .{ .pred = mayRetry, .target = 1 } },
             // 7
+            .{ .call = onFail },
+            // 8
             .finish,
         };
         const Prog = breeze.Program(@This(), &instrs);
     };
 
     pub fn init(self: *State, cfg: Config) void {
-        _ = cfg;
+        self.cfg = cfg;
         self.prog = .{};
+        self.join = .{};
         self.attempts = 0;
-        self.ok = false;
+        self.outcome = null;
     }
 
     pub fn poll(self: *State, now: Tick, events: u32) Step {
@@ -338,6 +395,7 @@ const App = breeze.AppWithHardware(.{
 }, &.{
     "i2c0",
     "uart0",
+    "esc0",
     "encoder_l",
     "encoder_r",
     "motor_l",
@@ -374,7 +432,8 @@ fn micros(now: Tick) u64 {
 // --- interrupts -------------------------------------------------------------
 //
 // The complete ISR vocabulary of this application: advance time, push a byte,
-// raise a flag. No module code, no allocation, no formatting.
+// raise a flag, complete a gather slot. No module code, no allocation, no
+// formatting.
 
 export fn SysTick_Handler() callconv(.c) void {
     hal.tickIsr();
@@ -385,8 +444,18 @@ export fn UART0_RX_Handler() callconv(.c) void {
     sched.events.setFromIsr(EVT_UART_RX);
 }
 
+/// A gather slot, seen from the interrupt side: name the branch, hand over what
+/// it measured.
+///
+/// If this fires before `Boot` has started an attempt, the slot is not running
+/// and the completion is refused - the join will time out and retry, which is
+/// the right answer for a peripheral that answered before it was asked.
 export fn IMU_INT_Handler() callconv(.c) void {
-    sched.events.setFromIsr(EVT_IMU_READY);
+    boot_state.join.finish(Boot.State.IMU, 0); // imu0.whoAmI()
+}
+
+export fn ESC_READY_Handler() callconv(.c) void {
+    boot_state.join.finish(Boot.State.ESC, 0); // esc0.selfTestResult()
 }
 
 // --- entry point ------------------------------------------------------------
