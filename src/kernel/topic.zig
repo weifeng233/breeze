@@ -250,6 +250,11 @@ pub fn Topic(comptime name: []const u8, comptime Payload: type) type {
         }
 
         /// Parse a frame previously produced by `pack`.
+        ///
+        /// Every field is checked, including the topic id: without that check a
+        /// frame of any other topic whose payload happens to be the same length
+        /// decodes cleanly, with valid checksums, into this topic's payload.
+        /// Two 12-byte topics are all it takes to make that a real mix-up.
         pub fn unpack(frame: []const u8) !Payload {
             if (frame.len < frame_len) return error.FrameTooShort;
             if (frame[0] != packet_prefix) return error.BadPrefix;
@@ -259,7 +264,12 @@ pub fn Topic(comptime name: []const u8, comptime Payload: type) type {
                 (@as(u32, frame[2]) << 8) |
                 (@as(u32, frame[3]) << 16);
             if (len != payload_len) return error.LengthMismatch;
+            // Integrity first, then identity: a corrupted frame should report
+            // that it is corrupt, not that it belongs to another topic.
             if (crc8(frame[0..15]) != frame[15]) return error.BadHeaderChecksum;
+            if (std.mem.readInt(u32, frame[4..8], .little) != id) {
+                return error.TopicMismatch;
+            }
 
             const body = frame[0 .. header_len + payload_len];
             if (crc8(body) != frame[header_len + payload_len]) {
@@ -339,6 +349,24 @@ test "pack then unpack round-trips" {
     try std.testing.expectEqual(value.roll, back.roll);
     try std.testing.expectEqual(value.pitch, back.pitch);
     try std.testing.expectEqual(value.yaw, back.yaw);
+}
+
+test "unpack refuses a frame that belongs to a different topic" {
+    // The two topics have the same 12-byte payload length, which is all it
+    // takes: without the id check the encoders frame below decodes into an
+    // attitude with valid checksums and entirely plausible floats.
+    try std.testing.expectEqual(TestAttitude.payload_len, TestEncoder.payload_len);
+
+    var buf: [64]u8 = undefined;
+    const value = TestEncoder.Value{ .left = 1, .right = -2, .tick_ms = 3 };
+    const frame = try TestEncoder.pack(&buf, &value, 0);
+
+    try std.testing.expectError(error.TopicMismatch, TestAttitude.unpack(frame));
+
+    // ...and it is still readable as the topic it actually is.
+    const back = try TestEncoder.unpack(frame);
+    try std.testing.expectEqual(value.left, back.left);
+    try std.testing.expectEqual(value.tick_ms, back.tick_ms);
 }
 
 test "frame header carries the documented fields" {

@@ -110,6 +110,31 @@ pub const MillisecondGrid = struct {
     }
 };
 
+test "the documented interval bound is the one the arithmetic assumes" {
+    // Waits and deadlines are compared as *signed* differences, so any interval
+    // up to 2^31-1 ms (~24.8 days) is unambiguous and anything longer is not.
+    // `max_interval_ms` is that bound; this test is what makes the claim in the
+    // file header checkable rather than decorative - before it existed, nothing
+    // in the repository referenced the constant at all.
+    try std.testing.expectEqual(@as(u32, 0x7FFF_FFFF), max_interval_ms);
+
+    // The largest interval whose signed difference is still positive, and the
+    // two ends of the ordinary case around it.
+    const from: Tick = 0;
+    const farthest = after(from, max_interval_ms);
+    try std.testing.expectEqual(@as(i32, 0x7FFF_FFFF), elapsedSigned(from, farthest));
+    try std.testing.expect(!reached(from, farthest)); // in the future
+    try std.testing.expect(reached(farthest, farthest)); // exactly reached
+
+    // One millisecond more and the sign flips: the difference becomes the most
+    // negative i32, so that interval is indistinguishable from a timestamp 2^31
+    // ms in the *past*. The concrete harm is here - `elapsed` reports the wait
+    // as already expired instead of as an enormous one.
+    const beyond = after(from, max_interval_ms + 1);
+    try std.testing.expectEqual(@as(i32, -0x8000_0000), elapsedSigned(from, beyond));
+    try std.testing.expectEqual(@as(u32, 0), elapsed(from, beyond));
+}
+
 test "elapsed is wrap-safe" {
     try std.testing.expectEqual(@as(u32, 100), elapsed(0, 100));
     try std.testing.expectEqual(@as(u32, 0), elapsed(100, 100));

@@ -4,8 +4,9 @@
 # relative path back to this checkout. Its cost is that the copy can silently
 # drift from the source, so this script writes a VENDORED.md recording the
 # commit it copied from and a hash of every file. Re-running it on an unchanged
-# Breeze tree produces a byte-identical result; `-Check` reports drift instead
-# of writing.
+# Breeze tree produces byte-identical *copies* - VENDORED.md itself differs,
+# because it records the time of the copy and `git describe`. `-Check` reports
+# drift instead of writing.
 #
 # Usage:
 #   pwsh tools/vendor.ps1 -Dest <dir>            # copy into <dir>

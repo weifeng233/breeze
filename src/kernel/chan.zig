@@ -124,8 +124,14 @@ pub fn Channel(comptime T: type, comptime capacity: usize) type {
         }
 
         /// Elements currently queued.
+        ///
+        /// Both indices go through `shared`, not just the one this side does not
+        /// own: this is the one accessor the header table allows from either
+        /// side, so the side that merely *reads* the other's index would
+        /// otherwise be free to cache it across a loop and report a frozen
+        /// count.
         pub fn count(self: *const Self) u32 {
-            return (shared.load(u32, &self.head) -% self.tail) & mask;
+            return (shared.load(u32, &self.head) -% shared.load(u32, &self.tail)) & mask;
         }
 
         pub fn isEmpty(self: *const Self) bool {

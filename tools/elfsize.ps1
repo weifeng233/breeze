@@ -67,14 +67,32 @@ function Get-ElfSections {
             $p++
         }
 
-        # SHT_NOBITS (.bss) occupies RAM but no file space.
-        $isRam = $type -eq 8
-        if ($isRam) { $ram += $size } else { $flash += $size }
+        # SHT_NOBITS (.bss, .noinit) occupies RAM but no file space.
+        #
+        # A writable PROGBITS section (.data) costs *both*: it has an initialiser
+        # in the load image and a live copy in RAM. Counting it as flash only
+        # under-reported RAM by the size of .data - 96 B on the fusion firmware,
+        # which was more than a quarter of the figure the docs were quoting.
+        $isNobits = $type -eq 8
+        $isWritable = ($flags -band 0x1) -ne 0
+
+        $kind = ''
+        if ($isNobits) {
+            $ram += $size
+            $kind = 'ram'
+        } elseif ($isWritable) {
+            $flash += $size
+            $ram += $size
+            $kind = 'flash+ram'
+        } else {
+            $flash += $size
+            $kind = 'flash'
+        }
 
         $rows.Add([pscustomobject]@{
             Section = $name
             Size    = $size
-            Kind    = if ($isRam) { 'ram' } else { 'flash' }
+            Kind    = $kind
         })
     }
 

@@ -148,7 +148,14 @@ pub fn Program(comptime Ctx: type, comptime instrs: []const Instr(Ctx)) type {
         /// start. It is overwritten by the next `wait_event_timeout`.
         timed_out: bool = false,
 
-        /// True when the program is at its start and not mid-wait.
+        /// True when the program is at instruction 0 and no *timed* wait is in
+        /// progress.
+        ///
+        /// Carefully worded, because it is narrower than "has not started". A
+        /// program parked at instruction 0 on a `wait_event` reports true:
+        /// `waiting` tracks only timed waits, since those are the ones that need
+        /// an origin timestamp. A review constructed exactly that case. Treat
+        /// this as "no time-based wait is open", not as "nothing has happened".
         pub fn isAtStart(self: *const Self) bool {
             return self.pc == 0 and !self.waiting;
         }

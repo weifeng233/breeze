@@ -21,6 +21,7 @@ pub const HostHal = struct {
     var crit_depth: u32 = 0;
     var crit_entries: u32 = 0;
     var idle_calls: u32 = 0;
+    var watchdog_kicks: u32 = 0;
 
     /// Current virtual time in milliseconds.
     pub fn now() Tick {
@@ -47,6 +48,16 @@ pub const HostHal = struct {
         idle_calls += 1;
     }
 
+    /// Optional kernel hook: the superloop is still turning.
+    ///
+    /// Implemented here so that a test can observe it. The hook existed in the
+    /// HAL contract with no caller anywhere in the kernel for long enough that
+    /// it read as a supported feature; a backend that can be counted is what
+    /// makes the wiring checkable rather than assumed.
+    pub fn watchdogKick() void {
+        watchdog_kicks += 1;
+    }
+
     /// Move the virtual clock forward.
     pub fn advance(ms: u32) void {
         now_ms +%= ms;
@@ -63,6 +74,7 @@ pub const HostHal = struct {
         crit_depth = 0;
         crit_entries = 0;
         idle_calls = 0;
+        watchdog_kicks = 0;
     }
 
     // --- test introspection ------------------------------------------------
@@ -80,6 +92,11 @@ pub const HostHal = struct {
     /// Times the kernel reported itself idle.
     pub fn idleCalls() u32 {
         return idle_calls;
+    }
+
+    /// Times the kernel kicked the watchdog.
+    pub fn watchdogKicks() u32 {
+        return watchdog_kicks;
     }
 
     /// Drive a scheduler forward by `ms` virtual milliseconds.

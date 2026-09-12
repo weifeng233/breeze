@@ -175,6 +175,11 @@ pub fn Scheduler(comptime Hal: type, comptime defs: anytype) type {
             const events = self.events.snapshot();
             var ran_any = false;
 
+            // Kick the watchdog once per pass, not once per task: what it is
+            // watching is that the loop keeps turning. A pass in which no task
+            // was due is still a healthy loop.
+            if (comptime hal.hasWatchdog(Hal)) Hal.watchdogKick();
+
             inline for (defs, 0..) |def, i| {
                 const st = &self.states[i];
                 const period: u32 = def.period_ms;
@@ -188,7 +193,16 @@ pub fn Scheduler(comptime Hal: type, comptime defs: anytype) type {
                 const due = st.pending or period == 0 or tick.reached(now, st.next_run);
 
                 if (due) {
-                    if (period != 0 and tick.reached(now, st.next_run)) {
+                    // Lateness is charged to the *activation*, not to every pass
+                    // the activation stays suspended. `next_run` deliberately
+                    // does not move while a task is `.pending`, so measuring it
+                    // again on each re-poll would report the time the task has
+                    // been suspended as lateness and fire one overrun per pass
+                    // for a single miss - a task parked on an event for a second
+                    // would report a hundred overruns and a second of lateness.
+                    const fresh_activation = !st.pending;
+
+                    if (period != 0 and fresh_activation and tick.reached(now, st.next_run)) {
                         const late = tick.elapsed(st.next_run, now);
                         st.last_late = late;
                         if (late > st.max_late) st.max_late = late;
@@ -300,13 +314,18 @@ fn validateDefs(comptime defs: anytype) void {
                 ));
             }
         }
-        // `max_late_ms` is optional, but a misspelt or nonsensical one would
-        // silently disable overrun detection for that task - the exact failure
-        // the hook exists to prevent - so reject it rather than ignore it.
+        // `max_late_ms` is optional, and the type is checked when it is
+        // present - an integer literal has type `comptime_int`, not `u32`, so
+        // both are accepted and range and sign are left to the coercion in
+        // `maxLateOf`.
         //
-        // The type check accepts `comptime_int` too, because an integer literal
-        // in a task definition has that type and not `u32`. Range and sign are
-        // left to the coercion in `maxLateOf`.
+        // What this cannot do is catch a *misspelling*. Task definitions are
+        // anonymous struct literals, so `.max_late = 5` is a perfectly legal
+        // field that this loop never looks at, and the task silently gets no
+        // overrun detection. A review demonstrated exactly that. The only real
+        // fix is a named task-definition type, which would cost the table its
+        // current shape; until then, the way to check is `observesOverruns()`,
+        // which answers "is anyone watching?" rather than "was anyone late?".
         if (@hasField(@TypeOf(def), "max_late_ms")) {
             switch (@typeInfo(@TypeOf(def.max_late_ms))) {
                 .int, .comptime_int => {},
@@ -710,6 +729,78 @@ test "a suspended sequence is re-polled promptly instead of waiting a period" {
     // The period now applies: nothing runs again until the next grid slot.
     sched.run();
     try std.testing.expectEqual(@as(u32, 3), Fixture.seq_steps);
+}
+
+test "lateness is charged once per activation, not once per re-poll" {
+    Fixture.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{
+            .name = "seq",
+            .period_ms = 100,
+            .ctx = &Fixture.seq_steps,
+            .poll = Fixture.Sequencer.poll,
+            .max_late_ms = 1,
+        },
+    });
+    var sched = S.init();
+
+    // Starts on time at t=0 and then works across three passes while the clock
+    // moves. `next_run` deliberately stays put while a task is suspended, so a
+    // scheduler that re-measures lateness on every re-poll reports the time the
+    // task has been *suspended* as lateness - and fires one overrun per pass
+    // for one activation that was never late.
+    host.HostHal.setNow(0);
+    sched.run();
+    host.HostHal.setNow(10);
+    sched.run();
+    host.HostHal.setNow(20);
+    sched.run(); // finishes here, 80 ms before its next slot
+
+    try std.testing.expectEqual(@as(u32, 3), Fixture.seq_steps);
+    try std.testing.expectEqual(@as(u32, 0), sched.worstLateness());
+    try std.testing.expectEqual(@as(u32, 0), sched.totalOverruns());
+    try std.testing.expectEqual(@as(u32, 0), sched.totalResyncs());
+
+    // The next activation is genuinely late and is still counted.
+    host.HostHal.setNow(250);
+    sched.run();
+    try std.testing.expectEqual(@as(u32, 150), sched.worstLateness());
+    try std.testing.expectEqual(@as(u32, 1), sched.totalOverruns());
+}
+
+test "the watchdog hook is called once per pass, and only if declared" {
+    Fixture.reset();
+
+    const S = Scheduler(host.HostHal, .{
+        .{ .name = "slow", .period_ms = 100, .ctx = &Fixture.counter_a, .poll = Fixture.CountA.poll },
+    });
+    var sched = S.init();
+
+    host.HostHal.setNow(0);
+    sched.run(); // runs
+    host.HostHal.setNow(50);
+    sched.run(); // nothing due
+
+    // Both passes kicked, including the one where no task was due: what the
+    // watchdog watches is that the loop keeps turning.
+    try std.testing.expectEqual(@as(u32, 2), host.HostHal.watchdogKicks());
+
+    // A HAL without the hook compiles to nothing - `hasWatchdog` is comptime,
+    // so this is not a runtime branch.
+    const Bare = struct {
+        pub fn now() Tick {
+            return 0;
+        }
+        pub fn criticalEnter() void {}
+        pub fn criticalExit() void {}
+    };
+    const BareS = Scheduler(Bare, .{
+        .{ .name = "t", .period_ms = 10, .ctx = &Fixture.counter_a, .poll = Fixture.CountA.poll },
+    });
+    var bare = BareS.init();
+    bare.run();
+    try std.testing.expect(!hal.hasWatchdog(Bare));
 }
 
 test "idle hook fires only when nothing is runnable" {

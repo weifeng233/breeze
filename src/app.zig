@@ -297,14 +297,34 @@ fn validateTop(comptime decls: anytype, comptime hardware: []const []const u8) v
     }
 }
 
-/// Every `depends` name must be provided by some module in this app.
+/// Every `depends` name must be provided by some *other* module in this app.
 fn validateDepends(comptime decls: anytype) void {
     inline for (decls, 0..) |decl, i| {
         for (decl.module.manifest.depends) |need| {
+            // A module that provides what it depends on is not a dependency,
+            // it is a typo. Without this the search below would find the
+            // module's own offer and pass, which is precisely the mistake the
+            // check exists to catch.
+            for (decl.module.manifest.provides) |offer| {
+                if (std.mem.eql(u8, need, offer)) {
+                    @compileError(std.fmt.comptimePrint(
+                        "module '{s}' lists '{s}' under both `depends` and " ++
+                            "`provides`; a dependency must be satisfied by a " ++
+                            "different module",
+                        .{ instanceNameOf(decl), need },
+                    ));
+                }
+            }
+
             var found = false;
             inline for (decls) |candidate| {
-                for (candidate.module.manifest.provides) |offer| {
-                    if (std.mem.eql(u8, need, offer)) found = true;
+                // Candidate must be a different module, not just a different
+                // instance: two instances of one module share a manifest, so
+                // accepting one another proves nothing.
+                if (candidate.module != decl.module) {
+                    for (candidate.module.manifest.provides) |offer| {
+                        if (std.mem.eql(u8, need, offer)) found = true;
+                    }
                 }
             }
             if (!found) {

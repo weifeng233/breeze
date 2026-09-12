@@ -119,7 +119,7 @@ pub const Join = struct {
     /// Register one unit of work. Call *before* starting it, or a completion
     /// that arrives immediately can be counted before it is expected.
     pub fn enter(self: *Join) void {
-        self.pending += 1;
+        shared.store(u16, &self.pending, shared.load(u16, &self.pending) +% 1);
     }
 
     /// Report one unit of work finished.
@@ -135,17 +135,30 @@ pub const Join = struct {
     /// decrements, so a caller waiting on `allDone` is not stranded by a
     /// failure - it is told about it via `failed` instead.
     pub fn leave(self: *Join, ok: bool) bool {
-        if (!ok) self.failed = true;
-        if (self.pending > 0) self.pending -= 1;
-        return self.pending == 0;
+        if (!ok) shared.store(bool, &self.failed, true);
+        const pending = shared.load(u16, &self.pending);
+        if (pending > 0) shared.store(u16, &self.pending, pending - 1);
+        return shared.load(u16, &self.pending) == 0;
     }
 
     /// True when every registered branch has reported in.
     ///
     /// A `Join` that was never entered is trivially done, which makes
     /// "no branches were needed" behave the same as "all branches finished".
+    ///
+    /// The volatile read is not decoration: without it the documented waiter
+    /// shape, `while (!join.allDone()) {}`, compiles to a load that is hoisted
+    /// out of the loop, and the join can never be observed to complete no
+    /// matter what the interrupt handler does. Reading through `shared` is the
+    /// same rule every other cross-context word in the kernel follows.
     pub fn allDone(self: *const Join) bool {
-        return self.pending == 0;
+        return shared.load(u16, &self.pending) == 0;
+    }
+
+    /// True when any branch reported a failure. Volatile for the same reason
+    /// as `allDone`.
+    pub fn anyFailed(self: *const Join) bool {
+        return shared.load(bool, &self.failed);
     }
 
     /// What one slot of a `Join.Of` is currently doing.
@@ -256,11 +269,11 @@ pub const Join = struct {
             /// round, and `anyFailed` says so.
             pub fn enter(self: *Self, slot: u16) bool {
                 if (slot >= cap) {
-                    self.misused = true;
+                    self.markMisused();
                     return false;
                 }
                 if (shared.load(SlotState, &self.state[slot]) == .running) {
-                    self.misused = true;
+                    self.markMisused();
                     return false;
                 }
                 shared.store(SlotState, &self.state[slot], .running);
@@ -275,7 +288,7 @@ pub const Join = struct {
             /// so it reports the overlap through `misused` and carries on.
             pub fn enterAll(self: *Self) void {
                 for (&self.state) |*s| {
-                    if (shared.load(SlotState, s) == .running) self.misused = true;
+                    if (shared.load(SlotState, s) == .running) self.markMisused();
                     shared.store(SlotState, s, .running);
                 }
             }
@@ -317,7 +330,7 @@ pub const Join = struct {
             /// Covers `misused` so that "is every slot valid?" is one question
             /// rather than two.
             pub fn anyFailed(self: *const Self) bool {
-                if (self.misused) return true;
+                if (shared.load(bool, &self.misused)) return true;
                 for (&self.state) |*s| {
                     if (shared.load(SlotState, s) == .failed) return true;
                 }
@@ -368,7 +381,18 @@ pub const Join = struct {
             /// be possible.
             pub fn reset(self: *Self) void {
                 for (&self.state) |*s| shared.store(SlotState, s, .idle);
-                self.misused = false;
+                shared.store(bool, &self.misused, false);
+            }
+
+            /// Set the misuse flag from either context.
+            ///
+            /// `misused` is written by interrupt handlers (`canComplete` on a
+            /// completion for a slot that is not running) and read by the
+            /// waiter, so it goes through `shared` like every other
+            /// cross-context word. Through a helper so that no future call site
+            /// can forget.
+            fn markMisused(self: *Self) void {
+                shared.store(bool, &self.misused, true);
             }
 
             /// Shared validity check for the two completion paths. Separated so
@@ -377,11 +401,11 @@ pub const Join = struct {
             /// value is in it.
             fn canComplete(self: *Self, slot: u16) bool {
                 if (slot >= cap) {
-                    self.misused = true;
+                    self.markMisused();
                     return false;
                 }
                 if (shared.load(SlotState, &self.state[slot]) != .running) {
-                    self.misused = true;
+                    self.markMisused();
                     return false;
                 }
                 return true;
@@ -403,17 +427,44 @@ pub const Join = struct {
 /// // ... and in the completion path:
 /// if (lim.release()) { /* the whole batch is finished */ }
 /// ```
+///
+/// # Concurrent acquire and release
+///
+/// `in_flight` is a read-modify-write in both `acquire` and `release`, and the
+/// whole of this type's state is. The intended split - a task filling the window
+/// while an interrupt handler empties it - is therefore subject to exactly the
+/// hazard described in the module comment for `Join`: a `release` that lands
+/// between `acquire`'s load and store is lost, `in_flight` over-counts, and
+/// because `release` reports completion only at zero, the batch is never
+/// announced as finished. The reverse interleaving lets the window exceed its
+/// bound, which is the one property the type exists to provide.
+///
+/// Guard both calls with the HAL's `criticalEnter`/`criticalExit`, or keep the
+/// window on one side of the interrupt boundary. Unlike `Join.Of` there is no
+/// slot-per-unit form to escape to here: the cursor is shared by definition.
 pub const Limiter = struct {
     cap: u16,
     in_flight: u16 = 0,
     cursor: u32 = 0,
     total: u32 = 0,
 
-    pub fn init(cap: u16, total: u32) Limiter {
-        // A zero window can never admit anything, so `acquire` would always
-        // return null and the batch would silently never run. Rejecting here
-        // turns a silent no-op into a failed assertion.
-        std.debug.assert(cap > 0);
+    /// A zero window can never admit anything, so `acquire` would always return
+    /// null and the batch would silently never run. `cap` is therefore a
+    /// comptime parameter and zero is a compile error.
+    ///
+    /// It used to be a plain `u16` with `std.debug.assert(cap > 0)`, which
+    /// claimed to turn that silent no-op into a failed assertion - except that
+    /// assertions are compiled out in `ReleaseSmall` and `ReleaseFast`, which is
+    /// how the firmware targets are built. The claim was false exactly where it
+    /// mattered. A literal window size is what callers write anyway, so making
+    /// it comptime costs nothing and enforces the invariant always.
+    pub fn init(comptime cap: u16, total: u32) Limiter {
+        comptime {
+            if (cap == 0) @compileError(
+                "Limiter needs a window of at least one; a zero window never " ++
+                    "admits anything, so the batch would never start",
+            );
+        }
         return .{ .cap = cap, .total = total };
     }
 
