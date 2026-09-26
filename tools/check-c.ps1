@@ -30,6 +30,9 @@
 #                 read stdin in a loop and quit on `q` - so the `q` is fed in
 #                 and the run is bounded by a timeout instead of hanging CI.
 #   tests         every tests/**/*.c builds, runs and reports zero failures.
+#   corpus        the answers committed in src/math/testdata/ still match a fresh
+#                 run of the C code, so the Zig ports are not checked against a
+#                 stale oracle (see docs/ARCHITECTURE.md §8).
 #
 # The counts are then compared with the claim in README.md, for the same reason
 # tools/sizes.ps1 checks the cost table: a document that restates a measurement
@@ -176,6 +179,63 @@ foreach ($u in $units) {
     }
 }
 Write-Output ("units        {0,3} found, {1} failing" -f $units.Count, $unitBad)
+
+# ----------------------------------------------------------------- corpus ---
+# The C library is the oracle the ported Zig modules are checked against
+# (ARCHITECTURE.md §8), and an oracle that drifts is worse than none: the Zig
+# tests would keep passing against yesterday's answers. So the generator is
+# re-run and its output compared with the committed copy. Regenerating is a
+# deliberate act, and this is what makes it deliberate.
+$corpusSrc = Join-Path $repoRoot 'tools/corpus/gen_math_corpus.c'
+$corpusFile = Join-Path $repoRoot 'src/math/testdata/math_corpus.txt'
+if ((Test-Path $corpusSrc) -and -not (Test-Path $corpusFile)) {
+    # A generator with nowhere to write is not "nothing to check": the Zig tests
+    # would fail to compile instead, with a less obvious message.
+    $failures.Add("$corpusFile is missing but the generator that produces it exists")
+    Write-Output '--- corpus: generator present, committed answers missing'
+}
+if ((Test-Path $corpusSrc) -and (Test-Path $corpusFile)) {
+    $gen = Get-ExePath -Name 'gen_math_corpus'
+    $built = Invoke-Tool -Exe $CC -Arguments ($cflags + @($corpusSrc, '-o', $gen, '-lm'))
+    if ($built.Code -ne 0) {
+        $failures.Add('the corpus generator does not compile')
+        Write-Output '--- tools/corpus/gen_math_corpus.c (does not compile)'
+        Write-Diagnostics -Text $built.Text
+    } else {
+        $run = Invoke-Program -Exe $gen -StdIn ''
+        if ($run.Code -ne 0) {
+            $failures.Add("the corpus generator exited with $($run.Code)")
+            Write-Output "--- gen_math_corpus (exit $($run.Code))"
+        } else {
+            # Line endings are normalised away: the file is committed with LF and
+            # a checkout elsewhere may not be.
+            $normalise = {
+                param($s)
+                (($s -split "`r?`n" | ForEach-Object { $_.TrimEnd() }) -join "`n").Trim()
+            }
+            $fresh = & $normalise $run.Out
+            $committed = & $normalise (Get-Content -Raw $corpusFile)
+            if ($fresh -ne $committed) {
+                $failures.Add('src/math/testdata/math_corpus.txt no longer matches a fresh run of the C generator')
+                Write-Output '--- corpus DRIFT: the committed answers differ from the C library'
+                $freshLines = $fresh -split "`n"
+                $committedLines = $committed -split "`n"
+                for ($i = 0; $i -lt [Math]::Max($freshLines.Count, $committedLines.Count); $i++) {
+                    $a = if ($i -lt $committedLines.Count) { $committedLines[$i] } else { '<missing>' }
+                    $b = if ($i -lt $freshLines.Count) { $freshLines[$i] } else { '<missing>' }
+                    if ($a -ne $b) {
+                        Write-Output ("    line {0}: committed '{1}' / fresh '{2}'" -f ($i + 1), $a, $b)
+                        break
+                    }
+                }
+                Write-Output '    regenerate with tools/corpus/gen_math_corpus.c and commit the result,'
+                Write-Output '    then check that the Zig ports still agree with it.'
+            } else {
+                Write-Output 'corpus       the committed C answers still match a fresh run'
+            }
+        }
+    }
+}
 
 # --------------------------------------------------------------- programs ---
 # Programs are discovered by convention: examples at the top level of

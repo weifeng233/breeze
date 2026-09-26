@@ -65,24 +65,32 @@ jobs:
       # rather than trusted. ARCHITECTURE.md and FUSION.md deliberately no
       # longer repeat these numbers; README is the single source.
       #
-      # Two suites now: the kernel's own tests, and the example application's,
+      # Three suites now: the kernel's own tests; the example application's,
       # which run on the host because its modules take their I/O surface as a
-      # comptime parameter. Both counts are claimed separately, so adding a test
-      # to either one fails here until README is updated.
+      # comptime parameter; and the algorithm layer's, which are neither (nothing
+      # under src/math/ imports the kernel, so calling them kernel tests would
+      # change what that number means). Each count is claimed separately, so
+      # adding a test to any one of them fails here until README is updated.
       - name: README's test counts must match reality
         run: |
           kernel=$(zig test src/breeze.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
           app=$(zig test --dep breeze -Mroot=examples/smartcar/app_test.zig -Mbreeze=src/breeze.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
+          math=$(zig test src/math/math.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
           claimed_kernel=$(grep -o '\*\*[0-9]* 个内核单元测试\*\*' README.md | head -1 | grep -o '[0-9]*')
           claimed_app=$(grep -o '\*\*[0-9]* 个应用测试\*\*' README.md | head -1 | grep -o '[0-9]*')
+          claimed_math=$(grep -o '\*\*[0-9]* 个算法测试\*\*' README.md | head -1 | grep -o '[0-9]*')
           echo "kernel: claimed=$claimed_kernel actual=$kernel"
           echo "app:    claimed=$claimed_app actual=$app"
+          echo "math:   claimed=$claimed_math actual=$math"
           test -n "$kernel" || { echo "could not parse the kernel test count"; exit 1; }
           test -n "$app" || { echo "could not parse the app test count"; exit 1; }
+          test -n "$math" || { echo "could not parse the algorithm test count"; exit 1; }
           test -n "$claimed_kernel" || { echo "could not parse README's kernel claim"; exit 1; }
           test -n "$claimed_app" || { echo "could not parse README's app claim"; exit 1; }
+          test -n "$claimed_math" || { echo "could not parse README's algorithm claim"; exit 1; }
           test "$kernel" = "$claimed_kernel"
           test "$app" = "$claimed_app"
+          test "$math" = "$claimed_math"
 
       - name: README's target count must match reality
         run: |

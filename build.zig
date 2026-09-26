@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     const unit_tests = b.addTest(.{ .root_module = breeze });
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
-    const test_step = b.step("test", "Run kernel unit tests and the application tests");
+    const test_step = b.step("test", "Run the kernel, application and algorithm tests");
     test_step.dependOn(&run_unit_tests.step);
 
     // The example application's tests run on the host like any other, because
@@ -34,6 +34,21 @@ pub fn build(b: *std.Build) void {
     });
     const run_app_tests = b.addRunArtifact(app_tests);
     test_step.dependOn(&run_app_tests.step);
+
+    // The algorithm layer's tests are their own suite. They are not kernel
+    // tests - nothing under src/math/ imports the kernel - and the kernel suite's
+    // size is a claim README makes about the kernel, so folding algorithm tests
+    // into it would quietly change what that number means. The migration adds
+    // modules here one at a time (docs/ARCHITECTURE.md §8).
+    const math_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/math/math.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_math_tests = b.addRunArtifact(math_tests);
+    test_step.dependOn(&run_math_tests.step);
 
     // --- host demo ---------------------------------------------------------
     const demo = b.addExecutable(.{
@@ -196,5 +211,6 @@ pub fn build(b: *std.Build) void {
     ci.dependOn(&fmt_c.step);
     ci.dependOn(&run_unit_tests.step);
     ci.dependOn(&run_app_tests.step);
+    ci.dependOn(&run_math_tests.step);
     ci.dependOn(check_step);
 }
