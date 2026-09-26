@@ -4,7 +4,10 @@
 # archive/c-algorithm-layer branch and docs/REVIEW.md §50.
 # Do not edit by hand: a changed number here should be a deliberate act with a
 # reason, not a regeneration.
-# format: <case> <value>...  (floats printed with %.9g, which round-trips float)
+# format: <case> <value>...
+# Most values are the C generator's %.9g. The ones re-locked when a deliberate
+# behaviour change moved them (REVIEW §51-§53) are Zig's shortest round-trip
+# decimal. Both parse back to the same f32, which is what the comparison needs.
 vec2_layout 8 4
 vec3_layout 12 4
 vec4_layout 16 4
@@ -207,7 +210,7 @@ median_update_without_init 3.5
 median_image_3x3 20 30 40 40 50 60 70 70 80 90 100 100
 median_image_even_kernel 30 40 40 40 50 60 70 70 80 80 90 100
 median_image_stride 2 3 3 238 238 4 5 6 238 238 7 7 8 238 238
-pid_position_run 10 -3.99249983 -7.39350128 3.20700073 -2.19350052 1.00650024
+pid_position_run 2.005 0.50750005 -1.5435002 -0.5279999 -1.0550001 -0.6688499
 pid_position_integral_after 0.0129999993
 pid_position_prev_error_after 0
 pid_position_prev_measurement_after 1
@@ -215,8 +218,8 @@ pid_incremental_run 10 -10 -10 10 -10 10
 pid_incremental_prev_output_after 10
 pid_incremental_prev_error_after 0
 pid_incremental_prev_prev_error_after -0.100000024
-pid_position_alpha0_run 10 -3.99249983 -7.39350128 3.20700073 -2.19350076 1.00650036
-pid_position_alpha07_run 5.00500011 -3.99249983 -7.39350128 3.20700073 -2.19350076 1.00650036
+pid_position_alpha0_run 2.005 1.0075 -0.3935001 0.20700005 -0.19350004 0.0064999997
+pid_position_alpha07_run 2.005 -2.4924998 -6.3435 0.52200043 -1.4990004 0.3148501
 pid_position_alpha1_run 2.00500011 -3.99249983 -7.39350128 3.20700073 -2.19350076 1.00650036
 pid_alpha_clamped_low 0
 pid_alpha_clamped_high 1
@@ -226,7 +229,7 @@ pid_position_output_clamped_run 1 1 -1 1 -1 0
 pid_integral_after_reset 0
 pid_prev_error_after_reset 0
 pid_prev_output_after_reset 0
-pid_run_after_reset 10 -3.99249983 -7.39350128 3.20700073 -2.19350052 1.00650024
+pid_run_after_reset 2.005 0.50750005 -1.5435002 -0.5279999 -1.0550001 -0.6688499
 statefb_layout 36 4
 statefb_k0 1.5
 statefb_k1 0.5
@@ -262,15 +265,15 @@ diffdrive_target_angular 0.200000003
 diffdrive_clamped_linear 1
 diffdrive_clamped_angular -3
 diffdrive_encoder_to_speed 18.8495407
-diffdrive_update_left -0.159917295 -0.325559318 0.409605503
-diffdrive_update_right -0.221119612 0.119190499 -0.427496314
+diffdrive_update_left -0.22184402 -0.2831478 -0.14598477
+diffdrive_update_right -0.24840035 -0.19465426 -0.2858422
 diffdrive_left_motor_id 1
 diffdrive_right_motor_id 2
 diffdrive_encoder_reset_flag 1
 diffdrive_setparams_left_kp 2
 diffdrive_setparams_right_kd 0.25
-diffdrive_update_tuned_left -0.840870976 -1 1
-diffdrive_update_tuned_right -1 0.52121675 -1
+diffdrive_update_tuned_left -1 -1 -0.82775694
+diffdrive_update_tuned_right -1 -1 -1
 omni3_num_wheels 3
 omni3_angles 0 2.09439349 4.18878698
 omni3_wheel_radius 0.0299999993
@@ -283,19 +286,19 @@ omni3_clamped_vy 0.800000012
 omni3_angular_clamped 3
 omni3_encoder_to_speed 18.8495407
 omni3_setparams_ki 0.200000003
-omni3_run_wheel0 -1 -0.9747915 0.41940996
-omni3_run_wheel1 -1 -0.5945575 -1
-omni3_run_wheel2 -1 -0.053939715 -1
+omni3_run_wheel0 -0.8231795 -0.8899685 -0.6917706
+omni3_run_wheel1 -1 -1 -1
+omni3_run_wheel2 -0.75088984 -0.66466486 -0.7738717
 omni3_motor_id_0 11
 omni3_motor_id_2 13
 omni3_rescaled_targets 0.25728464 -0.48543283 1
 omni3_unclamped_velocity 1 3
-omni3_pure_rotation_wheel0 -1 -0.711329341 0.0234504938
-omni3_pure_rotation_wheel1 -1 -0.296639502 -0.843741298
-omni3_pure_rotation_wheel2 -1 -0.277752101 -0.824835181
+omni3_pure_rotation_wheel0 -0.60722905 -0.66891783 -0.5321398
+omni3_pure_rotation_wheel1 -0.6638154 -0.61048424 -0.7020872
+omni3_pure_rotation_wheel2 -0.6355222 -0.58311474 -0.67554706
 omni4_num_wheels 4
 omni4_angles 0.78539753 2.35619259 3.92698765 5.49778271
-omni4_run_wheel3 -1 -0.10826954 0.023512766
+omni4_run_wheel3 -0.4850583 -0.43059674 -0.35140455
 omni4_motor_id_3 14
 mecanum_pid_kp 1
 mecanum_pid_output_max 1
@@ -308,10 +311,10 @@ mecanum_clamped_vy 0.800000012
 mecanum_clamped_omega 3
 mecanum_encoder_to_speed 18.8495407
 mecanum_setparams_ki 0.200000003
-mecanum_run_wheel0 -0.36360231 -0.611343503 0.783581972
-mecanum_run_wheel1 -1 -0.185118899 -1
-mecanum_run_wheel2 -1 -0.202337652 -1
-mecanum_run_wheel3 -0.625678122 0.197556481 0.423844337
+mecanum_run_wheel0 -0.46045554 -0.5265205 -0.3275986
+mecanum_run_wheel1 -0.90065706 -0.8128084 -0.9205802
+mecanum_run_wheel2 -0.8989923 -0.8130629 -0.9225654
+mecanum_run_wheel3 -0.53759384 -0.44709793 -0.32599032
 mecanum_motor_id_0 11
 mecanum_motor_id_3 14
 mecanum_pure_rotation_targets -0.180000007 0.180000007 -0.180000007 0.180000007
@@ -334,10 +337,10 @@ ackermann_angles_small_neg_inner -0.00499999989
 ackermann_angles_small_neg_outer -0.00499999989
 ackermann_angles_zero_inner 0
 ackermann_speed_setpoint 0.400000006
-ackermann_update_motors -0.627502322 0.600000024
+ackermann_update_motors -0.30692902 0.6
 ackermann_drive_motor_id 1
 ackermann_steering_motor_id 2
-ackermann_run_drive -0.627502322 -0.410729319 0.324350506
+ackermann_run_drive -0.30692902 -0.3683178 -0.23123978
 ackermann_run_steering 0.600000024 0.600000024 0.600000024
 mrac_theta0_init 0
 mrac_theta1_init 0
@@ -361,17 +364,17 @@ adaptive_period 3
 adaptive_pid_kp_init 2
 adaptive_prev_error_init 0
 adaptive_prev_output_init 0
-adaptive_run 5 0.0275001526 -3.36350107 5 1.6475656 5
+adaptive_run 5 4.5275 2.4864998 3.4284701 2.899915 3.3142803
 adaptive_kp_after 2.00500011
 adaptive_ki_after 0.50999999
 adaptive_kd_after 0.104999997
 adaptive_prev_error_after 2
-adaptive_prev_output_after 5
+adaptive_prev_output_after 3.3142803
 adaptive_counter_after 0
-adaptive_quiet_run -0.879950225 0.0200999808 0.0201499816 0.0201999806 0.0202499814 0.0202999804
+adaptive_quiet_run -0.9699501 -0.8709 -0.78175 -0.70151 -0.629289 -0.5642851
 adaptive_quiet_kp_after 2
 adaptive_quiet_counter_after 0
-adaptive_fast_run 50 2.00999999 2.75 3
+adaptive_fast_run 20.05 2.01 2.75 3
 adaptive_fast_kp_after 0.200000003
 adaptive_fast_ki_after 2.5
 adaptive_fast_kd_after 0.0100000007
@@ -390,7 +393,7 @@ balance_clamped_speed 1
 balance_clamped_turn -3
 balance_encoder_to_speed 18.8495407
 balance_run_ok 1 1 1
-balance_run_left -0.848672867 -1 -0.5
+balance_run_left -0.8000635 -1 -0.5
 balance_run_right -1 -0.648672819 -1
 balance_current_angle_after 1.01833139e-05
 balance_current_speed_after 0.508937597

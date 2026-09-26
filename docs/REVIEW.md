@@ -2014,3 +2014,99 @@ try std.testing.expect(!@hasDecl(@TypeOf(ak), "setSteeringPidParams"));
 **探针 6 条：1 条对照项绿、5 条按预期红、0 条不符**（A1 的证据：
 `corpus case 'ackermann_angles_right_inner'[0]: C says -0.21406874, port says 0.21406874`）。
 语料 556 → **553** 条（删 3 条已无对象的），算法测试仍 136。
+
+## 53. 控制律修正（三）：PID 微分滤波——C 的注释说明了它本来要做什么
+
+§34 记的是"位置式微分项把同一个值和自己混合"。修之前先把 C 的头文件读全，
+因为**修法取决于它想做什么**，而这次注释说得很清楚：
+
+```c
+float alpha;   /* 微分滤波系数（0.0到1.0） */
+ * @param alpha 滤波系数 - 值越低滤波效果越强
+ * 微分项（基于测量值以避免微分突跳）
+derivative          = (measurement - prev_measurement) / dt;
+filtered_derivative = alpha * derivative + (1 - alpha) * (prev_error - error) / dt;
+```
+
+三句话定了三件事：alpha 是**滤波**系数；**越低滤波越强**；微分**基于测量值以避免突跳**。
+而代码那一行是"低通滤波器的形状，第二项却写成了误差微分"：
+
+* 定值 setpoint 下 `(prev_error − error)/dt` **恒等于** `(measurement − prev_measurement)/dt`，
+  于是整式是"一个值和自己的凸组合"，alpha 只在第一个采样点（`prev_error` 还是初值 0）
+  和最后一位舍入上有影响——这就是 §34 记的现象；
+* 真正的低通应该是 `alpha·derivative + (1 − alpha)·filtered_previous`，
+  **同一个形状、同一个系数方向**（alpha=1 不滤波、alpha=0 滤波最强 ✓ 与注释一致），
+  只是第二项该是**上一次的滤波值**；
+* C 的结构体里**没有存这个值的字段**（只有 `prev_measurement`）。缺的那个状态
+  正是这个式子退化的原因：**它是一个把反馈项换成了"恰好等于输入"的低通**。
+
+### 改法
+
+加 `filtered_derivative` 状态字段，按注释的方向实现一极低通：
+
+```zig
+const derivative = (measurement - self.prev_measurement) / self.dt;
+const previous_filtered = self.filtered_derivative;
+self.filtered_derivative = self.alpha * derivative + (1.0 - self.alpha) * previous_filtered;
+const d_term = -self.kd * self.filtered_derivative;
+```
+
+误差微分那一项删掉——它本来就是要被滤掉的原始信号。`alpha` 的语义（越低越强）
+与 C 注释一致，`reset` 一并清这个状态。
+
+### 顺带发现的第二件事：原来那行还会在第一拍踢一脚
+
+探针 P1（把 C 那一行原样放回去）给出的第一个输出是 **10**（从 11 被限幅），
+而修好后是 **2.005**。原因：`prev_error` 初值是 0、`err` 是 1，于是
+`(1 − alpha)·(0 − 1)/dt = 0.9·(−100) = −90`，`d_term = −0.1·(−90)·… ` 直接给出一个
+**虚假的初始微分**。所以那行不只是"没滤波"，它还会在 setpoint 与 0 不等的第一次调用上
+**注入一个突跳**——而那正是注释说要避免的东西。
+
+### 验证：手算三拍，逐位对上
+
+`pid_position_run`（kp=2, ki=0.5, kd=0.1, dt=0.01, alpha=0.1）手算：
+
+| 拍 | 测量 | 原始微分 | 滤波值（一极递推） | D 项 | 输出 | 语料 |
+|---|---|---|---|---|---|---|
+| 0 | 0.0 | 0 | 0 | 0 | 2.005 | `2.005` ✓ |
+| 1 | 0.5 | 50 | 0.1·50 + 0.9·0 = 5 | −0.5 | 0.5075 | `0.50750005` ✓ |
+| 2 | 1.2 | 70 | 0.1·70 + 0.9·5 = 11.5 | −1.15 | −1.5435 | `-1.5435002` ✓ |
+
+**三拍逐位对上，而且第二拍用的是"上一拍的滤波值 × 0.9"**——如果实现里没有那个状态，
+第三拍就对不上。这比"跑一遍看数字"强：它证明的是递推本身。
+
+另有两条**不依赖语料**的性质断言：`alpha = 1` 时滤波值等于原始微分（50）；
+`alpha = 0` 时状态永远停在 0，于是 D 项恒为 0、控制器退化成纯 P（逐拍与 kd=0 的控制器
+**逐位相等**）；再加一条阶跃响应按 `(1 − alpha)` 衰减的检查。
+
+### 语料的动静：26 条重新落值
+
+这个改动会动到**所有 kd ≠ 0 的位置式 PID**，所以重新落值的不是两三条：
+
+| 模块 | 重新落值的用例 |
+|---|---|
+| pid | `pid_position_run`、`pid_position_alpha0/07/1_run`、`pid_run_after_reset` |
+| 差速 | `diffdrive_update_left/right`、`diffdrive_update_tuned_left/right` |
+| 全向 | `omni3_run_wheel0/1/2`、`omni3_pure_rotation_wheel0/1/2`、`omni4_run_wheel3` |
+| 麦轮 | `mecanum_run_wheel0..3` |
+| 阿克曼 | `ackermann_update_motors`、`ackermann_run_drive` |
+| 自适应 | `adaptive_run`、`adaptive_prev_output_after`、`adaptive_quiet_run`、`adaptive_fast_run` |
+| 平衡 | `balance_run_left`（及右侧同类） |
+
+**这些值是怎么来的，要说清楚**：不是手抄，是用一次临时插桩拿到的——语料比对失败时
+`corpus.zig` 打印 `RECORD <名> <值...>`，脚本据此重写那几行，**插桩在同一个提交里删掉**。
+这是"从代码回到语料"的动作，所以它的正当性不来自语料，而来自前面那两样东西：
+手算的三拍与不依赖语料的性质断言。**语料在这里的角色是回归锁，不是证据来源**——
+它已经冻结（§50），这次是**有意重锁**，理由就是本节。
+
+（顺带：值用的是 Zig 的最短往返十进制，与原来的 `%.9g` 都精确往返 f32；
+语料文件头的格式说明已相应更新。）
+
+### 又一次"探针红得不对"
+
+探针 P1/P2 第一次跑是红的，但**红在编译错误**上：改动让 `previous_filtered`
+成了未使用常量——和 §42/§47 遇到的是同一个陷阱（红的原因不对＝没有证据）。
+改成 `+ previous_filtered * 0.0` 保留使用之后，两条都红在语料比对上，
+证据分别是 `C says 2.005, port says 10`（P1）与 `C says 0.50750005, port says -3.9924998`（P2）。
+
+**探针 6 条：1 条对照项绿、5 条按预期红、0 条不符。** 语料条数不变（553，只改值）。

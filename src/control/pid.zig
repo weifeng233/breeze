@@ -5,23 +5,40 @@
 //! a `type` field, and that is kept here as `Kind` - a caller can still switch,
 //! and `compute` still dispatches on it.
 //!
-//! **The derivative filter does not filter.** In the position form the C code
-//! blends two terms that are analytically the same quantity:
+//! ## The derivative filter did not filter (§34), and the C's own comments say so
+//!
+//! The C wrote
 //!
 //!     derivative          = (measurement - prev_measurement) / dt
-//!     (prev_error - error) = (measurement - prev_measurement) / dt      [fixed setpoint]
+//!     filtered_derivative = alpha·derivative + (1 - alpha)·(prev_error - error) / dt
 //!
-//! so `alpha * derivative + (1 - alpha) * derivative` is a convex combination of
-//! a value with itself. The corpus shows exactly how far that goes and no
-//! further: `pid_position_alpha0_run`, `..._alpha07_...` and `..._alpha1_...`
-//! differ from each other in the *first* sample - where `prev_error` is still its
-//! initial 0 while the first error is not - and afterwards agree to the last bit
-//! except for the rounding of the blend. `setDerivativeFilter` therefore changes
-//! nothing but the first output and the last bit, and the port reproduces that
-//! rather than simplifying it away: a migration that "cleaned this up" would stop
-//! matching the implementation it is supposed to replace.
+//! and for a fixed setpoint `(prev_error - error) / dt` **is** `(measurement -
+//! prev_measurement) / dt` - the same quantity - so the expression is a convex
+//! combination of a value with itself. `alpha` therefore changed only the first
+//! sample, where `prev_error` is still its initial zero, and otherwise the last
+//! bit of the rounding.
 //!
-//! In the incremental form `alpha` is not read at all.
+//! That is not what the header says it is. The same file calls `alpha` the
+//! *"微分滤波系数"* and documents `@param alpha` as *"值越低滤波效果越强"* - lower
+//! means stronger filtering - and the term above it is *"基于测量值以避免微分突跳"*,
+//! derivative on the measurement to avoid a setpoint kick. Those three statements
+//! describe a one-pole low-pass on the measurement derivative:
+//!
+//!     filtered = alpha · derivative + (1 - alpha) · filtered_previous
+//!
+//! which is the same shape as the line the C wrote, with the **previous filtered
+//! value** where the error-derivative sits. The struct has no field to keep that
+//! value, and that missing state is exactly why the expression degenerates: it is a
+//! low-pass with its feedback term replaced by something that happens to be equal
+//! to its input.
+//!
+//! So the port keeps the documented convention (`alpha = 1` is no filtering,
+//! `alpha = 0` is the strongest) and gives the filter the state it needs. The
+//! error-derivative term is gone; it was the raw signal the filter was supposed to
+//! be smoothing. REVIEW §53 has the before/after and the corpus churn.
+//!
+//! In the incremental form `alpha` is still not read at all - the C does not read
+//! it there either, and that is a separate shape, not a filter that does nothing.
 
 const std = @import("std");
 
@@ -43,14 +60,19 @@ pub const Pid = struct {
     prev_measurement: f32 = 0,
     prev_output: f32 = 0,
 
+    /// The derivative filter's state: the last value it produced. The C has no
+    /// field for this, which is why its filter could not filter.
+    filtered_derivative: f32 = 0,
+
     output_min: f32,
     output_max: f32,
 
     integral_min: f32,
     integral_max: f32,
 
-    /// Derivative filter coefficient. See the module comment: it barely matters
-    /// in the position form and not at all in the incremental one.
+    /// Derivative filter coefficient, 0..1. **Lower means stronger filtering**,
+    /// as the C header documents: 1 is the raw measurement derivative, 0 freezes
+    /// the derivative at its last value.
     alpha: f32 = 0.1,
 
     dt: f32,
@@ -81,7 +103,6 @@ pub const Pid = struct {
     pub fn setDerivativeFilter(self: *Pid, alpha: f32) void {
         self.alpha = if (alpha < 0.0) 0.0 else if (alpha > 1.0) 1.0 else alpha;
     }
-
     pub fn setIntegralLimits(self: *Pid, integral_min: f32, integral_max: f32) void {
         self.integral_min = integral_min;
         self.integral_max = integral_max;
@@ -98,6 +119,7 @@ pub const Pid = struct {
         self.prev_prev_error = 0.0;
         self.prev_measurement = 0.0;
         self.prev_output = 0.0;
+        self.filtered_derivative = 0.0;
     }
 
     pub fn computePosition(self: *Pid, measurement: f32) f32 {
@@ -113,12 +135,15 @@ pub const Pid = struct {
         }
         const i_term = self.ki * self.integral;
 
-        // Both terms are kept, including their rounding, because the corpus
-        // records what the C code produced bit for bit (see the module comment).
+        // Derivative on the measurement, so a setpoint step does not kick the
+        // output, then one pole of low-pass with `alpha` as the weight on the raw
+        // value (see the module comment for why that is the direction the C header
+        // documents). The read of `filtered_derivative` is the *previous* value:
+        // Zig evaluates the right-hand side before the assignment.
         const derivative = (measurement - self.prev_measurement) / self.dt;
-        const filtered_derivative = self.alpha * derivative +
-            (1.0 - self.alpha) * (self.prev_error - err) / self.dt;
-        const d_term = -self.kd * filtered_derivative;
+        const previous_filtered = self.filtered_derivative;
+        self.filtered_derivative = self.alpha * derivative + (1.0 - self.alpha) * previous_filtered;
+        const d_term = -self.kd * self.filtered_derivative;
 
         self.prev_error = err;
         self.prev_measurement = measurement;
@@ -201,7 +226,7 @@ test "pid: the incremental form matches the C answers" {
     try corpus.expectValue("pid_incremental_prev_prev_error_after", pid.prev_prev_error);
 }
 
-test "pid: alpha changes only the first sample, which is the point" {
+test "pid: alpha filters the derivative, in the direction the C header documents" {
     const corpus = try corpus_mod.Corpus.load();
 
     var runs: [3][measurements.len]f32 = undefined;
@@ -212,18 +237,53 @@ test "pid: alpha changes only the first sample, which is the point" {
         runs[i] = runPosition(&pid);
     }
 
+    // These three moved when the filter learned to filter: before the fix they
+    // differed only in the first sample. Re-locked, not re-derived - see REVIEW §53.
     try corpus.expectValues("pid_position_alpha0_run", &runs[0]);
     try corpus.expectValues("pid_position_alpha07_run", &runs[1]);
     try corpus.expectValues("pid_position_alpha1_run", &runs[2]);
 
-    // The finding, asserted rather than described: the first output depends on
-    // alpha, and from the second sample on the runs agree.
-    try std.testing.expect(runs[0][0] != runs[1][0]);
-    try std.testing.expect(runs[1][0] != runs[2][0]);
+    // The knob now does something wherever the derivative exists. From the second
+    // sample on the measurement has moved, so the raw derivative is non-zero and
+    // the two extremes disagree; on the first sample it has not moved yet, so no
+    // filter can say anything - which is why this starts at 1.
     for (1..measurements.len) |i| {
-        try std.testing.expectEqual(runs[0][i], runs[1][i]);
-        try std.testing.expectEqual(runs[1][i], runs[2][i]);
+        try std.testing.expect(runs[0][i] != runs[2][i]);
     }
+    try std.testing.expectEqual(runs[0][0], runs[2][0]);
+
+    // alpha = 1 is no filtering at all: the state is the raw measurement
+    // derivative. Between 0.0 and 0.5 with dt = 0.01 that is 50.
+    var unfiltered = Pid.init(.position, 0.0, 0.0, 0.1, 0.01, -10.0, 10.0);
+    unfiltered.setDerivativeFilter(1.0);
+    unfiltered.setSetpoint(1.0);
+    _ = unfiltered.compute(0.0);
+    _ = unfiltered.compute(0.5);
+    try std.testing.expectApproxEqAbs(@as(f32, 50.0), unfiltered.filtered_derivative, 1.0e-3);
+
+    // alpha = 0 is the strongest filtering, which in this form means the state
+    // never leaves zero - so the D term is exactly zero for every sample, and a
+    // controller with ki = 0 behaves as if kd were zero.
+    var frozen = Pid.init(.position, 2.0, 0.0, 0.1, 0.01, -10.0, 10.0);
+    frozen.setDerivativeFilter(0.0);
+    frozen.setSetpoint(1.0);
+    var p_only = Pid.init(.position, 2.0, 0.0, 0.0, 0.01, -10.0, 10.0);
+    p_only.setSetpoint(1.0);
+    for (measurements) |m| {
+        try std.testing.expectEqual(p_only.compute(m), frozen.compute(m));
+    }
+    try std.testing.expectEqual(@as(f32, 0.0), frozen.filtered_derivative);
+
+    // The low-pass itself, on a step and back: each sample keeps (1 - alpha) of
+    // the previous filtered value.
+    var lp = Pid.init(.position, 0.0, 0.0, 0.0, 0.01, -10.0, 10.0);
+    lp.setDerivativeFilter(0.25);
+    lp.setSetpoint(0.0);
+    _ = lp.compute(0.0); // flat: raw 0
+    _ = lp.compute(0.4); // raw jumps to 40
+    try std.testing.expectApproxEqAbs(@as(f32, 10.0), lp.filtered_derivative, 1.0e-4);
+    _ = lp.compute(0.4); // raw back to 0, the state keeps 0.75 of 10
+    try std.testing.expectApproxEqAbs(@as(f32, 7.5), lp.filtered_derivative, 1.0e-4);
 
     // And the coefficient itself is clamped, as in C.
     var pid = Pid.init(.position, 1, 1, 1, 0.01, -1, 1);
