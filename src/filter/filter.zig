@@ -15,6 +15,8 @@ pub const common = @import("common.zig");
 pub const low_pass = @import("low_pass.zig");
 pub const high_pass = @import("high_pass.zig");
 pub const complementary = @import("complementary.zig");
+pub const kalman = @import("kalman.zig");
+pub const median = @import("median.zig");
 
 /// One-pole low pass. Renamed from `low_pass.LowPass` for callers who import the
 /// stage rather than the file.
@@ -23,6 +25,9 @@ pub const Ewma = low_pass.Ewma;
 pub const HighPass = high_pass.HighPass;
 pub const DcBlocker = high_pass.DcBlocker;
 pub const Complementary = complementary.Complementary;
+pub const Kalman1D = kalman.Kalman1D;
+pub const Median = median.Median;
+pub const filterImage = median.filterImage;
 
 test {
     std.testing.refAllDecls(@This());

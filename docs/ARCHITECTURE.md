@@ -315,8 +315,8 @@ C 于是采用隐式声明——隐式 `malloc` 的返回类型是 `int`，在 6
 | 模块 | 头文件 | 行数 | 分配调用 | Zig 迁移 |
 |---|---|---|---|---|
 | math | 4 | 1431 | 34 | ✅ **已完成**（vector / matrix / quaternion / interpolation） |
-| filter | 5 | 822 | 2 | **low_pass / high_pass / complementary 已完成**（§32）；kalman / median 待做 |
-| control | 10 | 2375 | 4 | 待做 |
+| filter | 5 | 822 | 2 | ✅ **已完成**（low_pass / high_pass / complementary / kalman / median） |
+| control | 10 | 2375 | 4 | 下一个（含 `platform/` 下 6 个平台控制器） |
 | image | 8 | 1878 | 72 | 待做 |
 
 整套 C 层全绿：35 个头文件逐个独立编译、14 个 TU 编译、5 个示例与 2 个应用

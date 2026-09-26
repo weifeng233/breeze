@@ -31,10 +31,13 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "../../include/breeze/filter/complementary_filter.h"
 #include "../../include/breeze/filter/high_pass_filter.h"
+#include "../../include/breeze/filter/kalman_filter.h"
 #include "../../include/breeze/filter/low_pass_filter.h"
+#include "../../include/breeze/filter/median_filter.h"
 #include "../../include/breeze/math/interpolation.h"
 #include "../../include/breeze/math/matrix.h"
 #include "../../include/breeze/math/quaternion.h"
@@ -83,6 +86,16 @@ static void pvals(const char* name, const float* values, int n) {
 
 static void pbp(const char* name, const BreezeBezierPoint* p) {
     printf("%s %.9g %.9g\n", name, (double)p->x, (double)p->y);
+}
+
+/* Image buffers: bytes, printed as integers. They parse as floats on the Zig
+ * side, which is all the comparison needs - and printing them as integers keeps
+ * a byte buffer readable in the fixture. */
+static void pbytes(const char* name, const unsigned char* bytes, int n) {
+    int i;
+    printf("%s", name);
+    for (i = 0; i < n; i++) printf(" %d", (int)bytes[i]);
+    putchar('\n');
 }
 
 /* A matrix prints its *used* region row-major, and the shape lives in the case
@@ -655,6 +668,97 @@ int main(void) {
     }
     pvals("complementary_run_roll", roll_run, 5);
     pvals("complementary_run_pitch", pitch_run, 5);
+
+    /* --- Kalman ---------------------------------------------------------- */
+    BreezeKalmanFilter1D kf;
+    const float meas[] = {1.0f, 2.0f, 3.0f, 2.5f, 4.0f};
+
+    BreezeKalmanFilter1D_Init(&kf, 0.01f, 0.1f, 1.0f, 0.0f);
+    pf("kalman_x_init", kf.x);
+    pf("kalman_p_init", kf.p);
+    pf("kalman_q_init", kf.q);
+    pf("kalman_r_init", kf.r);
+    pf("kalman_k_init", kf.k);
+    pf("kalman_a_init", kf.a);
+    pf("kalman_h_init", kf.h);
+
+    for (step_i = 0; step_i < 5; step_i++) run[step_i] = BreezeKalmanFilter1D_Update(&kf, meas[step_i]);
+    pvals("kalman_run", run, 5);
+    pf("kalman_x_after", BreezeKalmanFilter1D_GetState(&kf));
+    pf("kalman_p_after", BreezeKalmanFilter1D_GetCovariance(&kf));
+    pf("kalman_k_after", BreezeKalmanFilter1D_GetGain(&kf));
+
+    BreezeKalmanFilter1D_Init(&kf, 0.01f, 0.1f, 1.0f, 0.0f);
+    BreezeKalmanFilter1D_SetStateTransition(&kf, 0.9f);
+    for (step_i = 0; step_i < 5; step_i++) run[step_i] = BreezeKalmanFilter1D_Update(&kf, meas[step_i]);
+    pvals("kalman_transition_run", run, 5);
+    pf("kalman_a_after_set", kf.a);
+
+    BreezeKalmanFilter1D_Init(&kf, 0.01f, 0.1f, 1.0f, 0.0f);
+    BreezeKalmanFilter1D_SetMeasurementCoefficient(&kf, 2.0f);
+    for (step_i = 0; step_i < 5; step_i++) run[step_i] = BreezeKalmanFilter1D_Update(&kf, meas[step_i]);
+    pvals("kalman_measurement_run", run, 5);
+    pf("kalman_h_after_set", kf.h);
+
+    /* The 4-dimensional type is declared in the header with no functions at all -
+     * "waiting for the math module", which now exists. Its layout is recorded so
+     * the gap is visible in the fixture; the port does not fill it (REVIEW §33). */
+    printf("kalman_nd_layout %zu %zu\n", sizeof(BreezeKalmanFilterND), _Alignof(BreezeKalmanFilterND));
+
+    /* --- median ---------------------------------------------------------- */
+    float mbuf[6];
+    float msorted[6];
+    BreezeMedianFilter mf;
+    const float min[] = {1.0f, 100.0f, 2.0f, 3.0f, 2.0f, 1.5f, 2.2f};
+
+    BreezeMedianFilter_Init(&mf, mbuf, msorted, 5);
+    for (step_i = 0; step_i < 7; step_i++) run[step_i] = BreezeMedianFilter_Update(&mf, min[step_i]);
+    pvals("median_run", run, 7);
+
+    BreezeMedianFilter_Reset(&mf);
+    pf("median_reset_then_update", BreezeMedianFilter_Update(&mf, 9.0f));
+
+    /* An even window averages the two middle values. */
+    float ebuf[6];
+    float esorted[6];
+    BreezeMedianFilter_Init(&mf, ebuf, esorted, 4);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezeMedianFilter_Update(&mf, min[step_i]);
+    pvals("median_even_window_run", run, 6);
+
+    /* The insertion sort is part of the header's API, so it is checked directly. */
+    float tosort[6] = {3.0f, 1.0f, 4.0f, 1.5f, 5.0f, 2.0f};
+    BreezeMedianFilter_InsertionSort(tosort, 6);
+    pvals("median_insertion_sort", tosort, 6);
+
+    /* Never initialised: the C version passes the input straight through. */
+    BreezeMedianFilter mf_fresh = {NULL, NULL, 0, 0, 0};
+    pf("median_update_without_init", BreezeMedianFilter_Update(&mf_fresh, 3.5f));
+
+    /* Image median over a 4x3 image with an impulse in the middle. The impulse is
+     * what a median filter is for, so it should be gone from the output. */
+    unsigned char src_img[12] = {10, 20, 30, 40,
+                                 50, 200, 60, 70,
+                                 80, 90, 100, 110};
+    unsigned char dst_img[12];
+    memset(dst_img, 0, sizeof dst_img);
+    BreezeMedianFilterImage(src_img, dst_img, 4, 3, 3, 0);
+    pbytes("median_image_3x3", dst_img, 12);
+
+    /* An even kernel size is bumped up to the next odd one. */
+    memset(dst_img, 0, sizeof dst_img);
+    BreezeMedianFilterImage(src_img, dst_img, 4, 3, 4, 0);
+    pbytes("median_image_even_kernel", dst_img, 12);
+
+    /* A stride wider than the image: the padding columns are addressable but
+     * never written, so whatever was there stays. Pre-filling with 0xEE shows
+     * exactly which bytes the function owns. */
+    unsigned char src_str[15] = {1, 2, 3, 99, 99,
+                                 4, 5, 6, 99, 99,
+                                 7, 8, 9, 99, 99};
+    unsigned char dst_str[15];
+    memset(dst_str, 0xEE, sizeof dst_str);
+    BreezeMedianFilterImage(src_str, dst_str, 3, 3, 3, 5);
+    pbytes("median_image_stride", dst_str, 15);
 
     return 0;
 }
