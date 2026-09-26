@@ -293,3 +293,22 @@ omni4_num_wheels 4
 omni4_angles 0.78539753 2.35619259 3.92698765 5.49778271
 omni4_run_wheel3 -1 -0.249975622 -0.118334576
 omni4_motor_id_3 14
+mecanum_pid_kp 1
+mecanum_pid_output_max 1
+mecanum_target_vx_init 0
+mecanum_target_vx 0.300000012
+mecanum_target_vy -0.200000003
+mecanum_target_omega 0.100000001
+mecanum_clamped_vx 0.600000024
+mecanum_clamped_vy 0.800000012
+mecanum_clamped_omega 3
+mecanum_encoder_to_speed 18.8495407
+mecanum_setparams_ki 0.200000003
+mecanum_run_wheel0 -0.36360231 -0.611343503 0.783581972
+mecanum_run_wheel1 -1 -0.185118899 -1
+mecanum_run_wheel2 -1 -0.202337652 -1
+mecanum_run_wheel3 -0.625678122 0.197556481 0.423844337
+mecanum_motor_id_0 11
+mecanum_motor_id_3 14
+mecanum_pure_rotation_targets -0.180000007 0.180000007 -0.180000007 0.180000007
+mecanum_rescaled_targets 0.298701286 0.99999994 0.298701286 0.99999994

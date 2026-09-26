@@ -316,7 +316,7 @@ C 于是采用隐式声明——隐式 `malloc` 的返回类型是 `int`，在 6
 |---|---|---|---|---|
 | math | 4 | 1431 | 34 | ✅ **已完成**（vector / matrix / quaternion / interpolation） |
 | filter | 5 | 822 | 2 | ✅ **已完成**（low_pass / high_pass / complementary / kalman / median） |
-| control | 10 | 2375 | 4 | **pid / state_feedback / 差速 / 全向 已完成**（§34–§36）；fuzzy / adaptive / 阿克曼 / 麦轮 / 平衡待做 |
+| control | 10 | 2375 | 4 | **pid / state_feedback / 差速 / 全向 / 麦轮 已完成**（§34–§37）；fuzzy / adaptive / 阿克曼 / 平衡待做 |
 | image | 8 | 1878 | 72 | 待做 |
 
 整套 C 层全绿：35 个头文件逐个独立编译、14 个 TU 编译、5 个示例与 2 个应用

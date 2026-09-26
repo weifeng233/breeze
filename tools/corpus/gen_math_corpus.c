@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include "../../include/breeze/control/platform/differential_drive.h"
+#include "../../include/breeze/control/platform/mecanum_drive.h"
 #include "../../include/breeze/control/platform/omni_drive.h"
 #include "../../include/breeze/control/pid_controller.h"
 #include "../../include/breeze/control/state_feedback_controller.h"
@@ -1124,6 +1125,96 @@ int main(void) {
     }
     pvals("omni4_run_wheel3", omni_w3, 3);
     pi("omni4_motor_id_3", g_motor_id[3]);
+
+    /* --- mecanum drive ----------------------------------------------------- */
+    /* Same shape as the omni platform, and its inverse kinematics is the
+     * contrast worth recording: the rotation term *does* differ per wheel here
+     * (front-left and rear-left get -omega, front-right and rear-right +omega),
+     * which is what a rotation needs. */
+    BreezeMecanumDrive md;
+    const BreezeMecanumDriveConfig md_cfg = {
+        0.03f,   /* wheel_radius */
+        0.2f,    /* wheel_distance_x */
+        0.16f,   /* wheel_distance_y */
+        1.0f,    /* max_linear_speed */
+        3.0f,    /* max_angular_speed */
+        {11, 12, 13, 14},
+        {1, 2, 3, 4},
+        1000.0f  /* encoder_resolution */
+    };
+    float mw0[3];
+    float mw1[3];
+    float mw2[3];
+    float mw3[3];
+
+    BreezeMecanumDrive_Init(&md, md_cfg, fake_set_motor, fake_get_encoder, 0.01f);
+    pf("mecanum_pid_kp", md.wheel_pid[0].kp);
+    pf("mecanum_pid_output_max", md.wheel_pid[0].output_max);
+    pf("mecanum_target_vx_init", md.target_vx);
+
+    BreezeMecanumDrive_SetVelocity(&md, 0.3f, -0.2f, 0.1f);
+    pf("mecanum_target_vx", md.target_vx);
+    pf("mecanum_target_vy", md.target_vy);
+    pf("mecanum_target_omega", md.target_omega);
+
+    /* Radial clamp on the linear part, per-component on the angular part. */
+    BreezeMecanumDrive_SetVelocity(&md, 3.0f, 4.0f, 9.0f);
+    pf("mecanum_clamped_vx", md.target_vx);
+    pf("mecanum_clamped_vy", md.target_vy);
+    pf("mecanum_clamped_omega", md.target_omega);
+
+    pf("mecanum_encoder_to_speed", BreezeMecanumDrive_EncoderToSpeed(&md, 1000.0f));
+
+    BreezeMecanumDrive_SetPIDParams(&md, 1.0f, 0.2f, 0.1f);
+    pf("mecanum_setparams_ki", md.wheel_pid[3].ki);
+
+    BreezeMecanumDrive_SetVelocity(&md, 0.3f, -0.2f, 0.1f);
+    for (step_i = 0; step_i < 3; step_i++) {
+        g_motor_calls = 0;
+        g_encoder_step = step_i;
+        BreezeMecanumDrive_Update(&md);
+        mw0[step_i] = g_motor_speed[0];
+        mw1[step_i] = g_motor_speed[1];
+        mw2[step_i] = g_motor_speed[2];
+        mw3[step_i] = g_motor_speed[3];
+    }
+    pvals("mecanum_run_wheel0", mw0, 3);
+    pvals("mecanum_run_wheel1", mw1, 3);
+    pvals("mecanum_run_wheel2", mw2, 3);
+    pvals("mecanum_run_wheel3", mw3, 3);
+    pi("mecanum_motor_id_0", g_motor_id[0]);
+    pi("mecanum_motor_id_3", g_motor_id[3]);
+
+    /* Targets read back from the PID setpoints, where `Update` puts them. A pure
+     * rotation gives two values with opposite signs. */
+    BreezeMecanumDrive md_rot;
+    BreezeMecanumDrive_Init(&md_rot, md_cfg, fake_set_motor, fake_get_encoder, 0.01f);
+    BreezeMecanumDrive_SetVelocity(&md_rot, 0.0f, 0.0f, 1.0f);
+    g_motor_calls = 0;
+    g_encoder_step = 0;
+    BreezeMecanumDrive_Update(&md_rot);
+    const float mecanum_rot[4] = {
+        md_rot.wheel_pid[0].setpoint,
+        md_rot.wheel_pid[1].setpoint,
+        md_rot.wheel_pid[2].setpoint,
+        md_rot.wheel_pid[3].setpoint,
+    };
+    pvals("mecanum_pure_rotation_targets", mecanum_rot, 4);
+
+    /* Full speed plus full rotation: the per-wheel rescale fires. */
+    BreezeMecanumDrive md_fast;
+    BreezeMecanumDrive_Init(&md_fast, md_cfg, fake_set_motor, fake_get_encoder, 0.01f);
+    BreezeMecanumDrive_SetVelocity(&md_fast, 1.0f, 0.0f, 3.0f);
+    g_motor_calls = 0;
+    g_encoder_step = 0;
+    BreezeMecanumDrive_Update(&md_fast);
+    const float mecanum_fast[4] = {
+        md_fast.wheel_pid[0].setpoint,
+        md_fast.wheel_pid[1].setpoint,
+        md_fast.wheel_pid[2].setpoint,
+        md_fast.wheel_pid[3].setpoint,
+    };
+    pvals("mecanum_rescaled_targets", mecanum_fast, 4);
 
     return 0;
 }

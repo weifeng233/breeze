@@ -15,6 +15,7 @@ pub const pid = @import("pid.zig");
 pub const state_feedback = @import("state_feedback.zig");
 pub const platform = @import("platform.zig");
 pub const omni = @import("omni.zig");
+pub const mecanum = @import("mecanum.zig");
 
 pub const Pid = pid.Pid;
 pub const PidKind = pid.Kind;
@@ -24,6 +25,8 @@ pub const DifferentialConfig = platform.DifferentialConfig;
 pub const ImuData = platform.ImuData;
 pub const OmniDrive = omni.OmniDrive;
 pub const OmniKind = omni.OmniKind;
+pub const MecanumDrive = mecanum.MecanumDrive;
+pub const MecanumWheel = mecanum.Wheel;
 
 test {
     std.testing.refAllDecls(@This());
