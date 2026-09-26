@@ -27,7 +27,11 @@ pub const text = @embedFile("testdata/math_corpus.txt");
 /// modules are added - the parser says which case overflowed if it is not enough.
 pub const max_values = 16;
 
-pub const max_cases = 512;
+/// The number of cases the file may hold, with room to grow: the image stage
+/// alone is six modules of filter kernels and transforms still to come. The
+/// parser names this limit and the case that overran it, so raising it is a
+/// one-line change made when it is needed rather than a guess made now.
+pub const max_cases = 1024;
 
 pub const Entry = struct {
     name: []const u8,

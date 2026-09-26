@@ -424,3 +424,24 @@ fuzzy_compute_no_rules 0
 fuzzy_no_rules_grid_allocated 0
 fuzzy_compute_empty_consequent 0
 fuzzy_grid_freed 1
+threshold_forward 0 0 255 255 0 0 255 255 0 0 255 255
+threshold_inverse 255 255 0 0 255 255 0 0 255 255 0 0
+threshold_at_value_forward 0
+threshold_at_value_inverse 255
+threshold_stride 0 0 255 238 238 0 0 255 238 238 0 0 255 238 238
+otsu_bimodal 14
+otsu_uniform 0
+otsu_two_levels 5
+otsu_all_zero 0
+otsu_all_max 0
+otsu_stride 14
+apply_otsu_stride_threshold 14
+apply_otsu_stride_result 0 0 255 255 238 0 0 255 255 238 0 0 255 255 238
+otsu_stride_total 60
+apply_otsu_stride_total_threshold 60
+apply_otsu_stride_total_result 0 0 0 255 238 238 0 0 255 0 238 238
+otsu_stride_read 10
+apply_otsu_stride_read_threshold 10
+apply_otsu_stride_read_result 0 255 255 255 238 238 255 255 0 255 238 238
+apply_otsu_threshold 14
+apply_otsu_result 0 0 255 255 0 0 255 255 0 0 255 255

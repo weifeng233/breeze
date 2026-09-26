@@ -17,6 +17,7 @@ const std = @import("std");
 pub const math = @import("math/math.zig");
 pub const filter = @import("filter/filter.zig");
 pub const control = @import("control/control.zig");
+pub const image = @import("image/image.zig");
 
 test {
     std.testing.refAllDecls(@This());

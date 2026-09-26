@@ -35,6 +35,8 @@
 
 #include "../../include/breeze/control/adaptive_controller.h"
 #include "../../include/breeze/control/fuzzy_controller.h"
+#include "../../include/breeze/image/binary_threshold.h"
+#include "../../include/breeze/image/otsu_threshold.h"
 #include "../../include/breeze/control/platform/balance_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
@@ -1575,6 +1577,142 @@ int main(void) {
 
     BreezeFuzzyController_Free(&fz);
     pi("fuzzy_grid_freed", fz.output_discretization == NULL);
+
+    /* --- binary and Otsu thresholding --------------------------------------- */
+    /* A bimodal 4x3 image: two clusters, far apart, so Otsu has an easy job. */
+    const unsigned char imgsrc[12] = {10, 12, 200, 210,
+                                      11, 13, 205, 190,
+                                      9,  14, 195, 215};
+    unsigned char imgdst[12];
+
+    memset(imgdst, 0, sizeof imgdst);
+    BreezeBinaryThreshold(imgsrc, imgdst, 4, 3, 100, 255, 0);
+    pbytes("threshold_forward", imgdst, 12);
+
+    memset(imgdst, 0, sizeof imgdst);
+    BreezeInverseBinaryThreshold(imgsrc, imgdst, 4, 3, 100, 255, 0);
+    pbytes("threshold_inverse", imgdst, 12);
+
+    /* At exactly the threshold the two functions are complements: forward keeps
+     * `> threshold`, inverse keeps `<= threshold`. */
+    {
+        const unsigned char edge[1] = {100};
+        unsigned char out[1];
+        BreezeBinaryThreshold(edge, out, 1, 1, 100, 255, 0);
+        pi("threshold_at_value_forward", out[0]);
+        BreezeInverseBinaryThreshold(edge, out, 1, 1, 100, 255, 0);
+        pi("threshold_at_value_inverse", out[0]);
+    }
+
+    /* A stride wider than the image: the padding is never written, so a
+     * pre-filled destination shows exactly which bytes the function owns.
+     *
+     * The source is laid out at the same stride, and that is a fix rather than
+     * a nicety: the first version of this case passed the packed 12-byte image
+     * at stride 5, so the last pixel read landed one byte past the array and
+     * the recorded value came from whatever the stack held there. The port's
+     * buffer check refused to reproduce it, which is how it was found. */
+    {
+        unsigned char widesrc[15];
+        unsigned char wide[15];
+        int y;
+        memset(widesrc, 0xAA, sizeof widesrc);
+        memset(wide, 0xEE, sizeof wide);
+        for (y = 0; y < 3; y++) memcpy(&widesrc[y * 5], &imgsrc[y * 4], 4);
+
+        BreezeBinaryThreshold(widesrc, wide, 3, 3, 100, 255, 5);
+        pbytes("threshold_stride", wide, 15);
+    }
+
+    pi("otsu_bimodal", BreezeOtsuThreshold(imgsrc, 4, 3, 0));
+
+    /* A uniform image: the background weight reaches the total at the single
+     * occupied bin, the foreground is empty, and the loop breaks - so the answer
+     * is the initial 0 whatever the pixel value is. */
+    {
+        const unsigned char flat[6] = {77, 77, 77, 77, 77, 77};
+        pi("otsu_uniform", BreezeOtsuThreshold(flat, 3, 2, 0));
+    }
+
+    /* Two values only: the split is between them. */
+    {
+        const unsigned char two[8] = {5, 5, 5, 5, 200, 200, 200, 200};
+        pi("otsu_two_levels", BreezeOtsuThreshold(two, 4, 2, 0));
+    }
+
+    /* Both ends of the range, where the two guards fire in opposite ways: at 0
+     * the background is still empty at the first populated bin (`continue`), at
+     * 255 the foreground empties at the last one (`break`). Neither can raise
+     * the variance above the initial 0, so both answer 0 - and neither answer
+     * says anything about the pixels, which is the point of pinning them. */
+    {
+        unsigned char zero[12];
+        unsigned char maxv[12];
+        memset(zero, 0, sizeof zero);
+        memset(maxv, 255, sizeof maxv);
+        pi("otsu_all_zero", BreezeOtsuThreshold(zero, 4, 3, 0));
+        pi("otsu_all_max", BreezeOtsuThreshold(maxv, 4, 3, 0));
+    }
+
+    /* The same bimodal image at stride 5: the padding is not in the histogram,
+     * so the threshold is the packed one and the padding survives the write. */
+    {
+        unsigned char widesrc[15];
+        unsigned char wide[15];
+        int y;
+        memset(widesrc, 0xAA, sizeof widesrc);
+        memset(wide, 0xEE, sizeof wide);
+        for (y = 0; y < 3; y++) memcpy(&widesrc[y * 5], &imgsrc[y * 4], 4);
+
+        pi("otsu_stride", BreezeOtsuThreshold(widesrc, 4, 3, 5));
+        pi("apply_otsu_stride_threshold", BreezeApplyOtsuThreshold(widesrc, wide, 4, 3, 255, 5));
+        pbytes("apply_otsu_stride_result", wide, 15);
+    }
+
+    /* A strided image whose histogram is *not* two far-apart clusters. Here the
+     * argmax really does depend on how many pixels the image has, so this case
+     * separates the C's `total_pixels = width * height` from `stride * height`:
+     * 60 when the padding is excluded, 250 when it is counted.
+     *
+     * It was found by searching - see tools/corpus/probe_otsu_total.c - because a
+     * mutation probe that made exactly that change stayed green against every
+     * other case in this file. Each perfectly separable image answers the same
+     * threshold whatever the total is. */
+    {
+        unsigned char mixed[12];
+        unsigned char out[12];
+        memset(mixed, 0xAA, sizeof mixed);
+        memset(out, 0xEE, sizeof out);
+        mixed[0] = 60;  mixed[1] = 60;  mixed[2] = 10;  mixed[3] = 200;
+        mixed[6] = 10;  mixed[7] = 10;  mixed[8] = 250; mixed[9] = 10;
+
+        pi("otsu_stride_total", BreezeOtsuThreshold(mixed, 4, 2, 6));
+        pi("apply_otsu_stride_total_threshold", BreezeApplyOtsuThreshold(mixed, out, 4, 2, 255, 6));
+        pbytes("apply_otsu_stride_total_result", out, 12);
+    }
+
+    /* An image whose strided read and packed read disagree: 10 the way the
+     * function is meant to read it, 120 if the stride is dropped and the pixels
+     * are read as if the rows were contiguous. This is the case that pins
+     * `BreezeApplyOtsuThreshold` forwarding its stride into the
+     * `BreezeOtsuThreshold` call inside it - without it, a probe that hard-coded
+     * that inner stride to 0 stayed green. Also found by probe_otsu_total.c. */
+    {
+        unsigned char rows[12];
+        unsigned char out[12];
+        memset(rows, 0xAA, sizeof rows);
+        memset(out, 0xEE, sizeof out);
+        rows[0] = 10;  rows[1] = 250; rows[2] = 120; rows[3] = 120;
+        rows[6] = 200; rows[7] = 120; rows[8] = 10;  rows[9] = 200;
+
+        pi("otsu_stride_read", BreezeOtsuThreshold(rows, 4, 2, 6));
+        pi("apply_otsu_stride_read_threshold", BreezeApplyOtsuThreshold(rows, out, 4, 2, 255, 6));
+        pbytes("apply_otsu_stride_read_result", out, 12);
+    }
+
+    memset(imgdst, 0, sizeof imgdst);
+    pi("apply_otsu_threshold", BreezeApplyOtsuThreshold(imgsrc, imgdst, 4, 3, 255, 0));
+    pbytes("apply_otsu_result", imgdst, 12);
 
     return 0;
 }
