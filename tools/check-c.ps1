@@ -186,6 +186,35 @@ Write-Output ("units        {0,3} found, {1} failing" -f $units.Count, $unitBad)
 # tests would keep passing against yesterday's answers. So the generator is
 # re-run and its output compared with the committed copy. Regenerating is a
 # deliberate act, and this is what makes it deliberate.
+#
+# The comparison is numeric rather than textual, and that is not a concession -
+# it is the same claim the Zig tests make, measured the same way. The C
+# library's transcendental results are *not* bit-identical across libm
+# implementations: `quat_euler_roundtrip` ends in ...002 on Windows and ...014 on
+# glibc, one ulp apart, and a byte comparison fails on a difference nobody can
+# act on. So the case *names* and value *counts* must match exactly (a renamed,
+# added or removed case still fails at once) and values are compared with the
+# float tolerance; the largest relative difference is printed even on success,
+# because "they agree" is worth quantifying.
+$corpusTolerance = 1.0e-6
+
+function Read-Corpus {
+    param([string]$Text)
+    $cases = [ordered]@{}
+    foreach ($raw in ($Text -split "`r?`n")) {
+        $line = $raw.Trim()
+        if ($line.Length -eq 0 -or $line.StartsWith('#')) { continue }
+        $parts = $line -split '\s+'
+        $values = [System.Collections.Generic.List[double]]::new()
+        for ($i = 1; $i -lt $parts.Count; $i++) {
+            $values.Add([double]::Parse($parts[$i], [System.Globalization.CultureInfo]::InvariantCulture))
+        }
+        if ($cases.Contains($parts[0])) { throw "duplicate corpus case '$($parts[0])'" }
+        $cases[$parts[0]] = $values.ToArray()
+    }
+    return $cases
+}
+
 $corpusSrc = Join-Path $repoRoot 'tools/corpus/gen_math_corpus.c'
 $corpusFile = Join-Path $repoRoot 'src/math/testdata/math_corpus.txt'
 if ((Test-Path $corpusSrc) -and -not (Test-Path $corpusFile)) {
@@ -207,31 +236,55 @@ if ((Test-Path $corpusSrc) -and (Test-Path $corpusFile)) {
             $failures.Add("the corpus generator exited with $($run.Code)")
             Write-Output "--- gen_math_corpus (exit $($run.Code))"
         } else {
-            # Line endings are normalised away: the file is committed with LF and
-            # a checkout elsewhere may not be.
-            $normalise = {
-                param($s)
-                (($s -split "`r?`n" | ForEach-Object { $_.TrimEnd() }) -join "`n").Trim()
-            }
-            $fresh = & $normalise $run.Out
-            $committed = & $normalise (Get-Content -Raw $corpusFile)
-            if ($fresh -ne $committed) {
-                $failures.Add('src/math/testdata/math_corpus.txt no longer matches a fresh run of the C generator')
-                Write-Output '--- corpus DRIFT: the committed answers differ from the C library'
-                $freshLines = $fresh -split "`n"
-                $committedLines = $committed -split "`n"
-                for ($i = 0; $i -lt [Math]::Max($freshLines.Count, $committedLines.Count); $i++) {
-                    $a = if ($i -lt $committedLines.Count) { $committedLines[$i] } else { '<missing>' }
-                    $b = if ($i -lt $freshLines.Count) { $freshLines[$i] } else { '<missing>' }
-                    if ($a -ne $b) {
-                        Write-Output ("    line {0}: committed '{1}' / fresh '{2}'" -f ($i + 1), $a, $b)
-                        break
+            $committedCases = Read-Corpus (Get-Content -Raw $corpusFile)
+            $freshCases = Read-Corpus $run.Out
+
+            $problems = [System.Collections.Generic.List[string]]::new()
+            $worstRel = 0.0
+            $worstDesc = ''
+
+            foreach ($name in $committedCases.Keys) {
+                if (-not $freshCases.Contains($name)) {
+                    $problems.Add("case '$name' is committed but missing from a fresh run")
+                    continue
+                }
+                $a = $committedCases[$name]
+                $b = $freshCases[$name]
+                if ($a.Count -ne $b.Count) {
+                    $problems.Add("case '$name' has $($a.Count) value(s) committed and $($b.Count) fresh")
+                    continue
+                }
+                for ($i = 0; $i -lt $a.Count; $i++) {
+                    $delta = [Math]::Abs($a[$i] - $b[$i])
+                    $scale = [Math]::Max([Math]::Abs($a[$i]), [Math]::Abs($b[$i]))
+                    $tolerance = [Math]::Max($corpusTolerance, $scale * $corpusTolerance)
+                    $rel = if ($scale -gt 0) { $delta / $scale } else { $delta }
+                    if ($rel -gt $worstRel) {
+                        $worstRel = $rel
+                        $worstDesc = "$name[$i]: $($a[$i]) vs $($b[$i])"
+                    }
+                    if ($delta -gt $tolerance) {
+                        $problems.Add("case '$name'[$i]: committed $($a[$i]), fresh $($b[$i])")
                     }
                 }
+            }
+            foreach ($name in $freshCases.Keys) {
+                if (-not $committedCases.Contains($name)) {
+                    $problems.Add("case '$name' appears in a fresh run but is not committed")
+                }
+            }
+
+            if ($problems.Count -gt 0) {
+                $failures.Add('src/math/testdata/math_corpus.txt no longer matches a fresh run of the C generator')
+                Write-Output '--- corpus DRIFT: the committed answers differ from the C library'
+                foreach ($p in ($problems | Select-Object -First 10)) { Write-Output "    $p" }
+                if ($problems.Count -gt 10) { Write-Output "    ... and $($problems.Count - 10) more" }
                 Write-Output '    regenerate with tools/corpus/gen_math_corpus.c and commit the result,'
                 Write-Output '    then check that the Zig ports still agree with it.'
+            } elseif ($worstRel -eq 0.0) {
+                Write-Output 'corpus       the committed C answers are identical to a fresh run'
             } else {
-                Write-Output 'corpus       the committed C answers still match a fresh run'
+                Write-Output ("corpus       the committed C answers match a fresh run (largest relative difference {0:E1} at {1})" -f $worstRel, $worstDesc)
             }
         }
     }
