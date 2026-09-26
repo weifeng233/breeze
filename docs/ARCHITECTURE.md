@@ -314,8 +314,8 @@ C 于是采用隐式声明——隐式 `malloc` 的返回类型是 `int`，在 6
 
 | 模块 | 头文件 | 行数 | 分配调用 | Zig 迁移 |
 |---|---|---|---|---|
-| math | 4 | 1431 | 34 | **vector、matrix、quaternion 已完成**；interpolation 待做 |
-| filter | 5 | 822 | 2 | 待做 |
+| math | 4 | 1431 | 34 | ✅ **已完成**（vector / matrix / quaternion / interpolation） |
+| filter | 5 | 822 | 2 | 下一个 |
 | control | 10 | 2375 | 4 | 待做 |
 | image | 8 | 1878 | 72 | 待做 |
 
