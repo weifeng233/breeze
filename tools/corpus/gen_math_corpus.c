@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include "../../include/breeze/control/adaptive_controller.h"
+#include "../../include/breeze/control/platform/balance_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
 #include "../../include/breeze/control/platform/mecanum_drive.h"
@@ -128,6 +129,37 @@ static void fake_set_motor(int motor_id, float speed) {
 /* One scripted sequence per encoder id, indexed by the *pass* - which the case
  * sets before each Update. Advancing a counter inside here would depend on how
  * many wheels a platform reads, and the wheel counts differ. */
+/* IMU scripts for the balance controller: mild by default, tilting or failing on
+ * request. The pass index selects the sample, as for the encoders. */
+static int g_imu_fail;
+static int g_imu_tilt;
+
+static int fake_get_imu(BreezeIMUData* out) {
+    if (g_imu_fail) return 0;
+
+    if (g_imu_tilt) {
+        out->gyro_x = 0.0f;
+        out->gyro_y = 10.0f;
+        out->gyro_z = 0.0f;
+        out->accel_x = -1.0f;
+        out->accel_y = 0.0f;
+        out->accel_z = 1.0f;
+        return 1;
+    }
+
+    static const float gy[] = {0.0f, 0.05f, -0.05f, 0.1f, -0.1f};
+    static const float axs[] = {0.0f, 0.05f, -0.05f, 0.1f, -0.1f};
+    int i = g_encoder_step % 5;
+
+    out->gyro_x = 0.0f;
+    out->gyro_y = gy[i];
+    out->gyro_z = 0.0f;
+    out->accel_x = axs[i];
+    out->accel_y = 0.0f;
+    out->accel_z = 1.0f;
+    return 1;
+}
+
 static float fake_get_encoder(int encoder_id, int reset) {
     /* Counts chosen so the wheel speeds land near the target: one count is
      * 2*pi*r/resolution/dt = 0.01885 m/s, so ~26 counts is ~0.5 m/s. Values that
@@ -1383,6 +1415,89 @@ int main(void) {
     pf("adaptive_fast_kp_after", apid_fast.pid.kp);
     pf("adaptive_fast_ki_after", apid_fast.pid.ki);
     pf("adaptive_fast_kd_after", apid_fast.pid.kd);
+
+    /* --- balance controller ------------------------------------------------ */
+    BreezeBalanceController bal;
+    const BreezeBalanceControllerConfig bal_cfg = {
+        0.03f,   /* wheel_radius */
+        0.15f,   /* wheel_distance */
+        0.5f,    /* max_tilt_angle */
+        1.0f,    /* max_speed */
+        3.0f,    /* max_angular_speed */
+        0.0f,    /* target_tilt_angle */
+        1,       /* left_motor_id */
+        2,       /* right_motor_id */
+        1,       /* left_encoder_id */
+        2,       /* right_encoder_id */
+        1000.0f  /* encoder_resolution */
+    };
+    int bal_ok[5];
+    float bal_left[5];
+    float bal_right[5];
+
+    BreezeBalanceController_Init(&bal, bal_cfg, fake_set_motor, fake_get_encoder, fake_get_imu, 0.01f);
+    pf("balance_angle_kp", bal.angle_pid.kp);
+    pf("balance_angle_kd", bal.angle_pid.kd);
+    pf("balance_angle_output_max", bal.angle_pid.output_max);
+    pf("balance_speed_kp", bal.speed_pid.kp);
+    pf("balance_speed_output_max", bal.speed_pid.output_max);
+    pf("balance_turn_kp", bal.turn_pid.kp);
+    pf("balance_filter_alpha", bal.imu_filter.alpha);
+    pf("balance_filter_dt", bal.imu_filter.dt);
+    pf("balance_current_angle_init", bal.current_angle);
+
+    BreezeBalanceController_SetTargets(&bal, 0.5f, 0.2f);
+    pf("balance_target_speed", bal.target_speed);
+    pf("balance_target_turn", bal.target_turn_rate);
+    BreezeBalanceController_SetTargets(&bal, 9.0f, -9.0f);
+    pf("balance_clamped_speed", bal.target_speed);
+    pf("balance_clamped_turn", bal.target_turn_rate);
+    pf("balance_encoder_to_speed", BreezeBalanceController_EncoderToSpeed(&bal, 1000.0f));
+
+    /* Three passes on the mild script: the estimated angle and speed, the return
+     * value, and the two motor commands. */
+    BreezeBalanceController_SetTargets(&bal, 0.3f, 0.1f);
+    for (step_i = 0; step_i < 3; step_i++) {
+        g_motor_calls = 0;
+        g_encoder_step = step_i;
+        bal_ok[step_i] = BreezeBalanceController_Update(&bal);
+        bal_left[step_i] = g_motor_speed[0];
+        bal_right[step_i] = g_motor_speed[1];
+    }
+    pvals("balance_run_ok", (const float[]){bal_ok[0], bal_ok[1], bal_ok[2]}, 3);
+    pvals("balance_run_left", bal_left, 3);
+    pvals("balance_run_right", bal_right, 3);
+    pf("balance_current_angle_after", bal.current_angle);
+    pf("balance_current_speed_after", bal.current_speed);
+
+    /* An IMU read failure: update reports it and commands nothing at all. */
+    BreezeBalanceController bal_fail;
+    BreezeBalanceController_Init(&bal_fail, bal_cfg, fake_set_motor, fake_get_encoder, fake_get_imu, 0.01f);
+    g_imu_fail = 1;
+    g_motor_calls = 0;
+    g_encoder_step = 0;
+    pi("balance_imu_failure_ok", BreezeBalanceController_Update(&bal_fail));
+    pi("balance_imu_failure_motor_calls", g_motor_calls);
+    g_imu_fail = 0;
+
+    /* Past the safety limit: the motors are zeroed and update reports 0. The
+     * script's rate drives the estimate up one pass at a time, so the first four
+     * passes are still balanced. */
+    BreezeBalanceController bal_tilt;
+    BreezeBalanceController_Init(&bal_tilt, bal_cfg, fake_set_motor, fake_get_encoder, fake_get_imu, 0.01f);
+    g_imu_tilt = 1;
+    for (step_i = 0; step_i < 5; step_i++) {
+        g_motor_calls = 0;
+        g_encoder_step = step_i;
+        bal_ok[step_i] = BreezeBalanceController_Update(&bal_tilt);
+        bal_left[step_i] = g_motor_speed[0];
+        bal_right[step_i] = g_motor_speed[1];
+    }
+    pvals("balance_tilt_ok", (const float[]){bal_ok[0], bal_ok[1], bal_ok[2], bal_ok[3], bal_ok[4]}, 5);
+    pvals("balance_tilt_left", bal_left, 5);
+    pvals("balance_tilt_right", bal_right, 5);
+    pf("balance_tilt_angle_after", bal_tilt.current_angle);
+    g_imu_tilt = 0;
 
     return 0;
 }

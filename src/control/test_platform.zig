@@ -12,6 +12,8 @@
 
 const std = @import("std");
 
+const platform_mod = @import("platform.zig");
+
 pub const Recording = struct {
     pub const Call = struct { motor_id: i32, speed: f32 };
 
@@ -70,5 +72,47 @@ pub const Recording = struct {
     /// the first sample.
     pub fn clearLog() void {
         startPass(0);
+    }
+
+    // --- IMU, for the balance controller ------------------------------------
+
+    /// What the fake IMU reports. `tilting` is a script that drives the estimated
+    /// pitch past any sane safety limit; `failing` returns nothing at all.
+    pub const ImuMode = enum { mild, tilting, failing };
+
+    pub var imu_mode: ImuMode = .mild;
+    pub var imu_reads: usize = 0;
+
+    /// The mild script: small rates and small accelerations, so the balance
+    /// controller stays inside its limits and the motor commands are its normal
+    /// output rather than a safety response.
+    const imu_mild_y = [_]f32{ 0.0, 0.05, -0.05, 0.1, -0.1 };
+    const imu_mild_x = [_]f32{ 0.0, 0.05, -0.05, 0.1, -0.1 };
+
+    pub fn readImu() ?platform_mod.ImuData {
+        imu_reads += 1;
+
+        switch (imu_mode) {
+            .failing => return null,
+            .tilting => return .{
+                .gyro_x = 0.0,
+                .gyro_y = 10.0,
+                .gyro_z = 0.0,
+                .accel_x = -1.0,
+                .accel_y = 0.0,
+                .accel_z = 1.0,
+            },
+            .mild => {
+                const i = pass % 5;
+                return .{
+                    .gyro_x = 0.0,
+                    .gyro_y = imu_mild_y[i],
+                    .gyro_z = 0.0,
+                    .accel_x = imu_mild_x[i],
+                    .accel_y = 0.0,
+                    .accel_z = 1.0,
+                };
+            },
+        }
     }
 };

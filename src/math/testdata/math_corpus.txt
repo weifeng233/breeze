@@ -374,3 +374,28 @@ adaptive_fast_run 50 2.00999999 2.75 3
 adaptive_fast_kp_after 0.200000003
 adaptive_fast_ki_after 2.5
 adaptive_fast_kd_after 0.0100000007
+balance_angle_kp 10
+balance_angle_kd 0.100000001
+balance_angle_output_max 1
+balance_speed_kp 0.5
+balance_speed_output_max 0.5
+balance_turn_kp 1
+balance_filter_alpha 0.980000019
+balance_filter_dt 0.00999999978
+balance_current_angle_init 0
+balance_target_speed 0.5
+balance_target_turn 0.200000003
+balance_clamped_speed 1
+balance_clamped_turn -3
+balance_encoder_to_speed 18.8495407
+balance_run_ok 1 1 1
+balance_run_left -0.848672867 -1 -0.5
+balance_run_right -1 -0.648672819 -1
+balance_current_angle_after 1.01833139e-05
+balance_current_speed_after 0.508937597
+balance_imu_failure_ok 0
+balance_imu_failure_motor_calls 0
+balance_tilt_ok 1 1 1 1 0
+balance_tilt_left -0.748672843 -1 -0.5 -0.748672843 0
+balance_tilt_right -1 -0.748672843 -1 -1 0
+balance_tilt_angle_after 0.546248436

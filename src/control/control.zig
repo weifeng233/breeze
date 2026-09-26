@@ -17,6 +17,7 @@ pub const platform = @import("platform.zig");
 pub const omni = @import("omni.zig");
 pub const mecanum = @import("mecanum.zig");
 pub const adaptive = @import("adaptive.zig");
+pub const balance = @import("balance.zig");
 pub const ackermann = @import("ackermann.zig");
 
 pub const Pid = pid.Pid;
@@ -33,6 +34,8 @@ pub const AckermannSteering = ackermann.AckermannSteering;
 pub const WheelAngles = ackermann.WheelAngles;
 pub const Mrac = adaptive.Mrac;
 pub const AdaptivePid = adaptive.AdaptivePid;
+pub const BalanceController = balance.BalanceController;
+pub const BalanceError = balance.Error;
 
 test {
     std.testing.refAllDecls(@This());
