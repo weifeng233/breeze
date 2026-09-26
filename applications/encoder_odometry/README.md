@@ -1,8 +1,11 @@
 # 基于编码器的里程计应用
 
-> **当前无法编译。** 本示例依赖 `include/breeze/breeze.h`，该头文件聚合的两个头文件存在缺陷，
-> 详见 [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) §8.1。
+> **可以编译并运行。** 本示例依赖 `include/breeze/breeze.h`，该头文件曾经因为两处缺陷
+> 无法编译，现已修好，详见 [../../docs/REVIEW.md](../../docs/REVIEW.md) §26。
 > 本文档描述的是设计意图与算法，保留作为算法层迁移到 Zig 时的对照。
+>
+> 构建与运行（在本目录下）：`gcc encoder_odometry.c -o encoder_odometry -lm`。
+> 程序是交互式的，按 `q` 退出。
 
 ## 概述
 

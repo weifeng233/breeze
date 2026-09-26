@@ -5,7 +5,8 @@
 > 相关文档：[FUSION.md](FUSION.md)（融合方案）· [LIBXR-XROBOT.md](LIBXR-XROBOT.md)（调研记录）
 >
 > C 版本的算法库（`include/`、`src/`）仍然保留，作为算法层迁移的参考与对照。
-> **它当前无法编译**，原因与迁移计划见第 8 节。
+> 它已经**修好并可编译、可运行**（由 `tools/check-c.ps1` 在 CI 里守着），
+> 但**尚未迁移**到 Zig；修复过程见 [REVIEW.md](REVIEW.md) §26，迁移计划见第 8 节。
 
 ## 1. 为什么换 Zig，以及放弃了什么
 
@@ -200,7 +201,7 @@ docs/
   ARCHITECTURE.md         本文档
   FUSION.md               融合方案
   LIBXR-XROBOT.md         LibXR/XRobot 调研记录
-include/ src/             旧 C 算法库（迁移参考，当前不可编译）
+include/ src/             旧 C 算法库（迁移参考，可编译可运行但尚未迁移）
 applications/             基于旧 C 算法库的应用示例（同上）
 ```
 
@@ -268,9 +269,11 @@ test "imports a file that does not exist" {
 
 ## 8. 算法层迁移计划
 
-现有 C 算法库（共 35 个头文件，其中 filter / control / image / math 27 个）**尚未迁移**。
+现有 C 算法库（四个算法模块共 27 个头文件、6506 行；加上 comm / core / debug 与
+`src/` 下的实现文件，`include/breeze/` 下共 35 个头文件、14 个翻译单元）**尚未迁移**。
+它留下来是为了当迁移时的**数值对照**，所以它必须真的能编译、能运行——而它曾经不能。
 
-### 8.1 它当前不可编译
+### 8.1 它曾经不可编译（已修）
 
 这不是推测，是实测结论。任何 `#include "breeze/breeze.h"` 的文件都编译失败：
 
@@ -280,22 +283,47 @@ include/breeze/math/interpolation.h:241:13: error: static declaration of
         'BreezeSplineInterpolation_Free' follows non-static declaration
 ```
 
-`breeze.h` 聚合了 63 个头文件，其中两个有上述缺陷，因此 `examples/*.c`（5 个）与
-`applications/` 下的两个应用**全部无法编译**——尽管它们各自的 README 曾写着
-`gcc xxx.c -o xxx -lm` 可以直接构建。这些 README 已按实际情况更正。
+第一个缺陷是同一个缓冲区结构体被完整写了两遍：两处都是**匿名**结构体，在 C 里是两个
+不同的类型，因此只要同时包含它们（`uart.h` 与聚合头都会）就冲突。第二个是
+`BreezeSplineInterpolation_Init` 在失败路径上调用了定义在其后的 `Free`，C 先按隐式声明
+处理，随后那个 `static` 定义就变成"跟在非 static 声明之后"。`src/core/error_codes.c`
+另缺一个 `<stddef.h>`。
 
-唯一能构建并通过的是 `tests/comm/test_comm_interface.c`（链接
-`include/breeze/core/globals.c`）：11/11 测试、42/42 断言通过。
+比"编译不过"更值得记的是**编过了也算错**的那部分：7 个头文件调用了
+`malloc` / `free` / `fabsf` / `sqrtf` / `expf`，却没有包含 `<stdlib.h>` / `<math.h>`，
+C 于是采用隐式声明——隐式 `malloc` 的返回类型是 `int`，在 64 位主机上**把指针截断**；
+隐式 `fabsf` 的返回值从整数寄存器里读。这些代码能编过，然后算出错误结果。
+
+同时发现两处**注释与代码不一致**：`adaptive_controller.h` 声称"基于误差和输出变化"
+调整 PID 参数，但输出变化量算出来从未被读过；`differential_drive.h` 在 `Init` 里算了
+最大轮速也从未使用。两者都按"保留行为、改正注释"处理，因为迁移要以**实际行为**为对照。
 
 ### 8.2 迁移时的硬性约束
 
-1. **分配器参数化**：现有代码有 100+ 处 `malloc/calloc/free`（`hough_transform`、`histogram`、
-   `interpolation` 等），其中 4 个头文件连 `stdlib.h` 都没包含。Zig 版本必须把 allocator 作为参数传入，
-   并提供"调用者提供缓冲区"的变体，否则嵌入式目标无法使用。
+1. **分配器参数化**：现有代码有 112 处 `malloc/calloc/realloc/free`，集中在 9 个头文件
+   （`interpolation` 34、`histogram` 26、`canny_edge` 14、`hough_transform` 14、
+   `morphology` 10、`gaussian_blur` 6、`fuzzy_controller` 4、`sobel_operator` 2、
+   `median_filter` 2）。Zig 版本必须把 allocator 作为参数传入，并提供"调用者提供缓冲区"
+   的变体，否则嵌入式目标无法使用。
 2. **错误用 error union**：取代 `BreezeErrorCode` 枚举 + 手工传播。
 3. **保持纯函数**：算法层不感知调度，只被任务调用。这一点现有设计已经满足，迁移时不要引入内核依赖。
-4. **顺序建议**：math（无依赖）→ filter → control → image（重内存，最后做）。
-   每迁移一个模块，就在 `src/` 下建立对应目录并补 `zig test`，与 C 版本做数值对照。
+4. **顺序**：math（无依赖）→ filter → control → image（重内存，最后做）。
+   每迁移一个模块，就在 `src/` 下建立对应目录并补 `zig test`，与修好的 C 版本做数值对照。
+
+### 8.3 现状（实测）
+
+| 模块 | 头文件 | 行数 | 分配调用 | 说明 |
+|---|---|---|---|---|
+| math | 4 | 1431 | 34 | 无依赖，先做 |
+| filter | 5 | 822 | 2 | |
+| control | 10 | 2375 | 4 | 含 `platform/` 下 6 个平台控制器 |
+| image | 8 | 1878 | 72 | 分配最重，最后做 |
+
+整套 C 层现在全绿：35 个头文件逐个独立编译、14 个 TU 编译、5 个示例与 2 个应用
+链接并运行、11 个通信测试（42 条断言）通过，全部在 `-Wall -Wextra -Werror` 下。
+守住它的是 `pwsh tools/check-c.ps1`——该脚本会重新测一遍上面这些数字，并与 README
+的计数比对；它需要 gcc，所以不在纯 Zig 的 `zig build ci` 里。修复过程与逐条证据见
+[REVIEW.md](REVIEW.md) 第 26 节。
 
 ## 9. 已知限制
 

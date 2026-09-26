@@ -5,9 +5,13 @@
 
 > **状态**：内核与模块系统已实现。`zig build ci` 通过：**109 个内核单元测试**、**14 个应用测试**、
 > **7 个目标交叉编译**（CYT2BL3、CYT4BB7 的 CM0+ 与 CM7、RT1064 各有一个具名目标）。
-> 这两个数字由 CI 校验，不允许漂移（见 `.github/workflows/ci.yml`）。
-> C 版本算法库仍保留在 `include/`、`src/` 中作为迁移参考，**但它当前无法编译**，
-> 原因见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 第 8 节。
+> 这些数字由 CI 校验，不允许漂移（见 `.github/workflows/ci.yml`）。
+> **C 算法层**（`include/`、`src/`）保留为迁移到 Zig 时的对照实现，已经修好：
+> **35 个头文件**、**5 个示例**、**2 个应用**、**11 个通信测试（42 条断言）**，
+> 全部在 `-Wall -Wextra -Werror` 下编译，示例与应用链接后可直接运行。
+> 这道检查由 `pwsh tools/check-c.ps1` 执行——它需要 gcc，因此不在纯 Zig 的
+> `zig build ci` 里；上面这几个数由它逐项核对。它**尚未迁移**，计划见
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 第 8 节。
 
 ## 设计要点
 

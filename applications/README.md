@@ -1,10 +1,12 @@
 # Breeze 框架应用示例（旧 C 算法库）
 
-> **这些示例当前无法编译。** 它们依赖 `include/breeze/breeze.h`，而该头文件聚合的 63 个头文件
-> 中有两个存在缺陷（`BreezeCommBuffer` 重复定义、`BreezeSplineInterpolation_Free` 声明顺序错误），
-> 详见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) §8.1。
+> **这些示例现在可以编译、链接并运行。** 它们依赖 `include/breeze/breeze.h`，
+> 该头文件曾经因为两处缺陷而无法编译（`BreezeCommBuffer` 重复定义、
+> `BreezeSplineInterpolation_Free` 声明顺序错误），现已修好，并由
+> `pwsh tools/check-c.ps1` 在 CI 中守住——修的过程与依据见
+> [../docs/REVIEW.md](../docs/REVIEW.md) 第 26 节。
 >
-> 保留本目录是为了给算法层向 Zig 迁移提供对照，不是可运行的样例。
+> 保留本目录是为了给算法层向 Zig 迁移提供对照，不是教学样例。
 > 新的、可运行的示例在 [`../examples/`](../examples)，用 `zig build demo` 运行。
 
 本目录包含基于旧 C 算法库编写的应用示例，展示了如何使用框架的算法模块构建应用。
@@ -39,15 +41,21 @@
 
 ## 编译状态
 
-| 目标 | 命令 | 结果 |
-|---|---|---|
-| `examples/*.c`（5 个） | `gcc examples/example.c -lm` | ❌ 失败 |
-| `applications/differential_drive_car` | `gcc differential_drive_car.c -lm` | ❌ 失败 |
-| `applications/encoder_odometry` | `gcc encoder_odometry.c -lm` | ❌ 失败 |
-| `tests/comm/test_comm_interface.c` | `gcc test_comm_interface.c ../../include/breeze/core/globals.c -lm` | ✅ 11/11 通过 |
+以下命令都是实测过的（gcc 13.1.0，`-std=gnu17 -Wall -Wextra -Werror`）：
 
-编译失败的原因在头文件，不在应用代码。修好那两个头文件后这些示例应当可以构建，
-但那属于算法层迁移工作的一部分。
+| 目标 | 命令（在所示目录下执行） | 结果 |
+|---|---|---|
+| `examples/*.c`（5 个） | `gcc example.c -o example -lm` | ✅ 链接并运行，输出 30–237 行 |
+| `applications/differential_drive_car` | `gcc differential_drive_car.c -o differential_drive_car -lm` | ✅ 链接；交互式，`q` 退出 |
+| `applications/encoder_odometry` | `gcc encoder_odometry.c -o encoder_odometry -lm` | ✅ 链接；交互式，`q` 退出 |
+| `tests/comm/test_comm_interface.c` | `gcc test_comm_interface.c ../../include/breeze/core/globals.c -lm` | ✅ 11/11 通过（42/42 断言） |
+
+两个应用是**交互式**的：`main` 里是 `while (1)` + `scanf`，靠 `q` 退出。因此在 CI 里
+它们是被喂入 `q` 并有超时保护的——一个因此挂住的程序会被报成失败，而不是把 CI 挂住。
+
+这道检查由 `pwsh tools/check-c.ps1` 执行，它逐个头文件独立编译、逐个 TU 编译、
+把每个程序链接并运行，再与 README 里的计数比对。它需要 gcc，因此不在纯 Zig 的
+`zig build ci` 里，而是 CI workflow 的单独一步。
 
 ## 硬件抽象
 
