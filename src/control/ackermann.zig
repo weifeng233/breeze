@@ -2,26 +2,33 @@
 //! `include/breeze/control/platform/ackermann_steering.h`.
 //!
 //! It shares the shape of the other platform controllers (a comptime platform
-//! type, PID objects by value, the kinematics as a pure function), but three
-//! things in this file are unusual enough to name up front. All three are
-//! recorded rather than corrected, and all three are pinned by the corpus:
+//! type, PID objects by value, the kinematics as a pure function). Three things
+//! were unusual here; two of them are now fixed, and the third was already
+//! resolved by dropping the field:
 //!
-//! * **`wheelAngles` loses the turn direction.** Its comment says it keeps the
-//!   sign of the input; above the small-angle branch it does not. For a right
-//!   turn the radius comes out negative, `atan` therefore returns negative
-//!   angles, and the closing `if (steering_angle < 0) negate` flips them back to
-//!   positive - so `wheelAngles(-a)` equals `wheelAngles(a)` for `|a| >= 0.01`,
-//!   while for `|a| < 0.01` the early return hands the input straight through and
-//!   the sign survives. The function is discontinuous in how it treats sign, and
-//!   the corpus records both sides of that boundary.
-//! * **The steering PID is never computed.** `update` writes its setpoint and
-//!   then uses a plain feedforward division for the steering output, so its gains
-//!   and integral have no effect on anything - `setSteeringPidParams` sets a knob
-//!   that turns nothing. The corpus records the integral still being zero after
-//!   an update.
+//! * **`wheelAngles` used to lose the turn direction** (§38). The C computed a
+//!   negative turning radius for a right turn - which is right, `atan` then
+//!   returns negative angles - and *then* negated them, so a right turn came out
+//!   looking exactly like a left one. The negation is gone; a right turn now gives
+//!   two negative angles with the inner wheel further round than the outer, which
+//!   is the mirror of the left turn. REVIEW §52.
+//! * **The steering PID is gone** (§38). The C has a `steering_pid` and a setter
+//!   for its gains, writes its setpoint every pass, and never computes it: the
+//!   steering command is `target / max`, feedforward. Closing that loop would need
+//!   a steering-angle measurement, and the platform interface has none - one
+//!   encoder, on the drive motor - so computing it would mean *inventing* a
+//!   feedback path. The knob is removed instead, and the test asserts its absence,
+//!   because a parameter that cannot affect anything invites a caller to believe it
+//!   did.
 //! * **`steering_ratio` is not carried.** The C config has the field and nothing
-//!   reads it, so it has no place here: a parameter that cannot affect anything
-//!   is a parameter that invites a caller to believe it did.
+//!   reads it, so it has no place here - same reasoning as the PID above.
+//!
+//! One limitation is left, and it is the C's: the geometry divides by
+//! `turning_radius ∓ track_width / 2`, which passes through zero when the turn is
+//! tight enough that the radius is under half the track. `setTargets` cannot reach
+//! that (its clamp is a steering angle, not a radius), but `wheelAngles` is public
+//! and takes any angle. It is recorded rather than guarded, because a guard would
+//! be a new decision about what a physically impossible turn should answer.
 
 const std = @import("std");
 
@@ -56,9 +63,6 @@ pub fn AckermannSteering(comptime Platform: type) type {
         encoder_resolution: f32,
 
         speed_pid: Pid,
-        /// Kept because the C struct has it and `update` writes its setpoint;
-        /// nothing ever computes from it (see the module comment).
-        steering_pid: Pid,
 
         target_speed: f32 = 0,
         target_steering_angle: f32 = 0,
@@ -89,7 +93,6 @@ pub fn AckermannSteering(comptime Platform: type) type {
                 .encoder_id = encoder_id,
                 .encoder_resolution = encoder_resolution,
                 .speed_pid = Pid.init(.position, 1.0, 0.1, 0.05, dt, -1.0, 1.0),
-                .steering_pid = Pid.init(.position, 1.0, 0.1, 0.05, dt, -1.0, 1.0),
                 .dt = dt,
             };
         }
@@ -98,14 +101,6 @@ pub fn AckermannSteering(comptime Platform: type) type {
             self.speed_pid.kp = kp;
             self.speed_pid.ki = ki;
             self.speed_pid.kd = kd;
-        }
-
-        /// Sets gains on a PID that `update` never computes; see the module
-        /// comment. Kept because the C API has it.
-        pub fn setSteeringPidParams(self: *Self, kp: f32, ki: f32, kd: f32) void {
-            self.steering_pid.kp = kp;
-            self.steering_pid.ki = ki;
-            self.steering_pid.kd = kd;
         }
 
         /// Speed and steering are clamped separately, each to its own maximum -
@@ -139,9 +134,8 @@ pub fn AckermannSteering(comptime Platform: type) type {
         /// The Ackermann geometry: the inner wheel steers further than the outer
         /// one so both describe the same turning circle.
         ///
-        /// Note the sign behaviour described in the module comment - the small
-        /// angle branch preserves the input's sign and everything above it does
-        /// not.
+        /// The sign of `steering_angle` survives: a right turn (negative input)
+        /// gives two negative angles. It did not before - see the module comment.
         pub fn wheelAngles(self: Self, steering_angle: f32) WheelAngles {
             if (@abs(steering_angle) < 0.01) {
                 return .{ .inner = steering_angle, .outer = steering_angle };
@@ -159,20 +153,19 @@ pub fn AckermannSteering(comptime Platform: type) type {
                 outer_radius = turning_radius - self.track_width / 2.0;
             }
 
-            var inner = std.math.atan(self.wheelbase / inner_radius);
-            var outer = std.math.atan(self.wheelbase / outer_radius);
-
-            if (steering_angle < 0) {
-                inner = -inner;
-                outer = -outer;
-            }
+            // The signs come out of the division: a right turn gives a negative
+            // radius, so both quotients are negative and both angles are too. The C
+            // negated them here, which turned every right turn into a left one.
+            const inner = std.math.atan(self.wheelbase / inner_radius);
+            const outer = std.math.atan(self.wheelbase / outer_radius);
 
             return .{ .inner = inner, .outer = outer };
         }
 
-        /// One control pass. The speed loop is closed; the steering output is
-        /// `target / max` with no feedback at all, which is what the C version
-        /// does (and says it does).
+        /// One control pass. The speed loop is closed. The steering channel is
+        /// `target / max` with no feedback at all - feedforward *by design*, since
+        /// the platform has no steering-angle measurement; see the module comment
+        /// for why the C's unused steering PID is not reproduced.
         ///
         /// The C version also computes the wheel angles here and discards them
         /// ("for reference only, not used in this simplified control"). The port
@@ -183,7 +176,6 @@ pub fn AckermannSteering(comptime Platform: type) type {
             const current_speed = self.encoderToSpeed(counts);
 
             self.speed_pid.setSetpoint(self.target_speed);
-            self.steering_pid.setSetpoint(self.target_steering_angle);
 
             const speed_output = self.speed_pid.compute(current_speed);
             const steering_output = self.target_steering_angle / self.max_steering_angle;
@@ -220,9 +212,15 @@ test "ackermann: construction and clamps match the C answers" {
     var ak = testAckermann();
     try corpus.expectValue("ackermann_speed_pid_kp", ak.speed_pid.kp);
     try corpus.expectValue("ackermann_speed_pid_output_max", ak.speed_pid.output_max);
-    try corpus.expectValue("ackermann_steering_pid_kp", ak.steering_pid.kp);
     try corpus.expectValue("ackermann_target_speed_init", ak.target_speed);
     try corpus.expectValue("ackermann_encoder_to_speed", ak.encoderToSpeed(1000.0));
+
+    // The three cases the C recorded for its steering PID are gone from the
+    // corpus, along with the field: there is no loop to compute. This asserts the
+    // absence, so re-adding a knob that nothing reads is a failing test rather
+    // than a quiet regression.
+    try std.testing.expect(!@hasField(@TypeOf(ak), "steering_pid"));
+    try std.testing.expect(!@hasDecl(@TypeOf(ak), "setSteeringPidParams"));
 
     ak.setTargets(0.5, 0.2);
     try corpus.expectValue("ackermann_target_speed", ak.target_speed);
@@ -236,7 +234,7 @@ test "ackermann: construction and clamps match the C answers" {
     try std.testing.expectEqual(@as(f32, -0.5), ak.target_steering_angle);
 }
 
-test "ackermann: the wheel angles lose the turn direction above the small-angle branch" {
+test "ackermann: a right turn is the mirror of a left turn" {
     const corpus = try corpus_mod.Corpus.load();
 
     const ak = testAckermann();
@@ -248,17 +246,24 @@ test "ackermann: the wheel angles lose the turn direction above the small-angle 
     try corpus.expectValue("ackermann_angles_right_inner", right.inner);
     try corpus.expectValue("ackermann_angles_right_outer", right.outer);
 
-    // The defect, asserted: turning left and turning right give the *same*
-    // wheel angles, so the geometry cannot tell a driver which way to steer.
-    try std.testing.expectEqual(left.inner, right.inner);
-    try std.testing.expectEqual(left.outer, right.outer);
+    // The fix, asserted: a right turn steers the other way. The C negated both
+    // angles at the end, which made this pair equal.
+    try std.testing.expect(right.inner < 0);
+    try std.testing.expect(right.outer < 0);
+    try std.testing.expect(!std.math.approxEqAbs(f32, left.inner, right.inner, 1.0e-6));
 
-    // The inner wheel steers further than the outer one, which is the part of
-    // the geometry that does work.
+    // Mirror symmetry, which is the property the geometry has to have and which a
+    // copied number would not establish.
+    try std.testing.expectApproxEqAbs(left.inner, -right.inner, 1.0e-6);
+    try std.testing.expectApproxEqAbs(left.outer, -right.outer, 1.0e-6);
+
+    // The inner wheel steers further than the outer one, on both sides: it is the
+    // one nearer the turning centre.
     try std.testing.expect(left.inner > left.outer);
+    try std.testing.expect(@abs(right.inner) > @abs(right.outer));
 
-    // Below the threshold the sign survives, because the early return passes the
-    // input through: the two branches disagree about what a sign means.
+    // The small-angle branch passes the input through, so it agrees with the
+    // geometry about sign now instead of contradicting it.
     const small_left = ak.wheelAngles(0.005);
     const small_right = ak.wheelAngles(-0.005);
     try corpus.expectValue("ackermann_angles_small_pos_inner", small_left.inner);
@@ -269,9 +274,14 @@ test "ackermann: the wheel angles lose the turn direction above the small-angle 
     try std.testing.expectEqual(small_left.inner, -small_right.inner);
     try std.testing.expectEqual(@as(f32, 0.0), ak.wheelAngles(0.0).inner);
     try corpus.expectValue("ackermann_angles_zero_inner", 0.0);
+
+    // And the two branches agree at the boundary: just above it the geometry must
+    // not answer a different sign than just below.
+    try std.testing.expect(ak.wheelAngles(0.0101).inner > 0);
+    try std.testing.expect(ak.wheelAngles(-0.0101).inner < 0);
 }
 
-test "ackermann: steering is feedforward and the steering PID is never computed" {
+test "ackermann: the steering channel is feedforward, and that is all there is" {
     const corpus = try corpus_mod.Corpus.load();
 
     var ak = testAckermann();
@@ -280,12 +290,6 @@ test "ackermann: steering is feedforward and the steering PID is never computed"
     ak.update();
 
     try corpus.expectValue("ackermann_speed_setpoint", ak.speed_pid.setpoint);
-    try corpus.expectValue("ackermann_steering_setpoint", ak.steering_pid.setpoint);
-
-    // The setpoint is written and then never consumed: the PID's integral is
-    // still zero, and the gains could be anything.
-    try corpus.expectValue("ackermann_steering_integral_after", ak.steering_pid.integral);
-    try std.testing.expectEqual(@as(f32, 0.0), ak.steering_pid.integral);
 
     try corpus.expectValues("ackermann_update_motors", &.{
         RecordingPlatform.log[0].speed, RecordingPlatform.log[1].speed,
@@ -293,15 +297,19 @@ test "ackermann: steering is feedforward and the steering PID is never computed"
     try corpus.expectInt("ackermann_drive_motor_id", RecordingPlatform.log[0].motor_id);
     try corpus.expectInt("ackermann_steering_motor_id", RecordingPlatform.log[1].motor_id);
 
-    // Whatever the steering gains are, the output does not change - which is
-    // what makes `setSteeringPidParams` a knob that turns nothing.
-    ak.setSteeringPidParams(100.0, 100.0, 100.0);
-    RecordingPlatform.startPass(0);
-    ak.update();
+    // The steering command is the target over the maximum, with nothing between
+    // them: no state, no gains, no history to vary.
     try std.testing.expectEqual(
         ak.target_steering_angle / ak.max_steering_angle,
         RecordingPlatform.log[1].speed,
     );
+
+    // The steering channel is stateless, so a second pass commands exactly the
+    // same value - which a loop would have made false.
+    const second = RecordingPlatform.log[1].speed;
+    RecordingPlatform.startPass(0);
+    ak.update();
+    try std.testing.expectEqual(second, RecordingPlatform.log[1].speed);
 }
 
 test "ackermann: a run matches the C answers, and the steering output is constant" {
