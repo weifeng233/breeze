@@ -8,19 +8,35 @@
 //! **The inverse kinematics is exposed as a function.** In C it is written inline
 //! in `Update`, which makes it invisible to a test and hard to read; here
 //! `wheelTargets` is a pure function of the three commanded velocities, and
-//! `update` is the loop around it. Same arithmetic, in the same order.
+//! `update` is the loop around it.
 //!
-//! That is how the defect below is pinned. The C rotation term is
+//! ## The control law was wrong, and REVIEW §36 said so for the wrong reason
+//!
+//! The C computes
 //!
 //!     wheel_targets[i] = vx·cos(θᵢ) + vy·sin(θᵢ) + wheel_distance·ω
 //!
-//! - the same `+ d·ω` for every wheel. A rotation turns wheels at *different*
-//!   angles in different directions (the tangential direction depends on where
-//!   the wheel sits); adding one constant to all of them is a translation along
-//!   the average wheel direction, not a rotation. The port reproduces it and a
-//!   test asserts the equality, so the behaviour is pinned rather than described
-//!   in a comment. Fixing it is a change to the platform's control law, and that
-//!   needs its own decision and its own tests - see REVIEW §36.
+//! and §36 recorded the *rotation* term as the defect: "one constant added to
+//! every wheel is a translation, not a rotation". That reasoning does not hold.
+//! `wheel_angles` is the wheel's **position** angle - the header says so, and an
+//! X-configuration omni drives **tangentially** - so the constraint on wheel `i`
+//! is
+//!
+//!     w_i = v · t̂_i + (ω × r_i) · t̂_i,   t̂_i = (−sin θᵢ, cos θᵢ),  r_i = d·r̂_i
+//!         = −vx·sin θᵢ + vy·cos θᵢ + ω·d
+//!
+//! The `+ω·d` **is** the same on every wheel, and that is what a rotation does to
+//! tangentially-mounted wheels: each one drives along its own tangent, and the
+//! tangents differ, so equal wheel speeds are a rotation and not a translation.
+//! What is wrong is the **linear** part: it projects the commanded velocity onto
+//! the *radial* direction `r̂_i` where a tangential wheel measures `v · t̂_i`. The
+//! two halves of the C expression assume different wheel orientations.
+//!
+//! So this module now computes the tangential form, which is the one the geometry
+//! implies. `wheelTargets` is still a pure function, and the test that pins it is
+//! a **round trip** through the forward kinematics rather than a copied number:
+//! commanding a velocity and reading it back has to return what went in.
+//! The change and its evidence are REVIEW §51.
 //!
 //! Angles use the literal `3.14159` and f32 arithmetic, as the C code does;
 //! `std.math.pi` would move them (and the corpus would say so).
@@ -44,6 +60,7 @@ fn wheelCount(comptime kind: OmniKind) usize {
 }
 
 /// Wheel angles measured from the x axis, computed the way the C `Init` does.
+/// These are the *positions* of the wheels; each drives along its own tangent.
 fn wheelAngles(comptime kind: OmniKind) [wheelCount(kind)]f32 {
     const pi: f32 = 3.14159;
     return switch (kind) {
@@ -153,12 +170,12 @@ pub fn OmniDrive(comptime Platform: type, comptime kind: OmniKind) type {
         /// The wheel speeds a commanded platform velocity asks for, including
         /// the "no wheel may exceed the maximum linear speed" rescale.
         ///
-        /// See the module comment: the rotation term is a constant added to every
-        /// wheel, which is what the C code does.
+        /// See the module comment: the linear part projects onto the wheel's
+        /// tangent, which is the direction a wheel in this configuration measures.
         pub fn wheelTargets(self: Self, vx: f32, vy: f32, omega: f32) [wheels]f32 {
             var targets: [wheels]f32 = undefined;
             for (angles, 0..) |angle, i| {
-                targets[i] = vx * @cos(angle) + vy * @sin(angle);
+                targets[i] = -vx * @sin(angle) + vy * @cos(angle);
                 targets[i] += self.wheel_distance * omega;
             }
 
@@ -293,6 +310,17 @@ test "omni: a run commands the motors the C version commands" {
     try corpus.expectValue("omni3_setparams_ki", od.wheel_pid[2].ki);
 
     od.setVelocity(0.3, 0.1, 0.2);
+
+    // The targets that command asks for, derived by hand from
+    // `wᵢ = −vx·sin θᵢ + vy·cos θᵢ + d·ω` at θ = 0, 120, 240 with d = 0.1:
+    // 0.1 + 0.02, −0.3(0.8660254) − 0.05 + 0.02, +0.3(0.8660254) − 0.05 + 0.02.
+    // The commands recorded below are then whatever the PID makes of them, so this
+    // is where the arithmetic itself is checked.
+    const commanded = od.currentWheelTargets();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.12), commanded[0], 1.0e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -0.2898076), commanded[1], 1.0e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2298076), commanded[2], 1.0e-6);
+
     var w0: [3]f32 = undefined;
     var w1: [3]f32 = undefined;
     var w2: [3]f32 = undefined;
@@ -327,6 +355,12 @@ test "omni: a run commands the motors the C version commands" {
         0.01,
     );
     od4.setVelocity(0.3, 0.1, 0.2);
+    // Wheel 3 sits at 315 degrees, so its tangent is (0.7071, 0.7071) and
+    // w₃ = 0.3(0.70710678) + 0.1(0.70710678) + 0.12(0.2) = 0.3068427. Hand-derived
+    // to the digit, like the three-wheel case above.
+    const commanded4 = od4.currentWheelTargets();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3068427), commanded4[3], 1.0e-6);
+
     var w3: [3]f32 = undefined;
     for (0..3) |i| {
         RecordingPlatform.startPass(i);
@@ -337,21 +371,49 @@ test "omni: a run commands the motors the C version commands" {
     try corpus.expectInt("omni4_motor_id_3", RecordingPlatform.log[3].motor_id);
 }
 
-test "omni: pure rotation gives every wheel the same target" {
+/// How close a round trip through the forward kinematics has to come back.
+///
+/// It is not f32's epsilon: the wheel angles are `2π/3` and `4π/3` computed from
+/// the literal `3.14159`, so the two lower wheels are not exactly symmetric, and
+/// equal wheel speeds come out differing by a few times 1e-6. Dividing by √3 in
+/// the forward map amplifies that to about 3e-6, which is why this is 1e-5.
+const round_trip_tolerance: f32 = 1.0e-5;
+
+/// The forward kinematics of the three-wheel layout: what the platform does when
+/// the wheels turn at these speeds. Derived by hand from the constraint
+/// `wᵢ = −vx·sin θᵢ + vy·cos θᵢ + d·ω` at θ = 0, 120, 240 degrees, and written
+/// separately from `wheelTargets` so that a round trip through both is evidence
+/// about the inverse rather than a restatement of it.
+fn forwardKinematics3(w: [3]f32, wheel_distance: f32) struct { vx: f32, vy: f32, omega: f32 } {
+    const sqrt3: f32 = 1.7320508;
+    return .{
+        .vx = (w[2] - w[1]) / sqrt3,
+        .vy = (2.0 * w[0] - w[1] - w[2]) / 3.0,
+        .omega = (w[0] + w[1] + w[2]) / (3.0 * wheel_distance),
+    };
+}
+
+test "omni: a pure rotation is a rotation, and the wheel speeds survive the trip back" {
     const corpus = try corpus_mod.Corpus.load();
 
     var od = testOmni3();
     od.setVelocity(0.0, 0.0, 1.0);
 
-    // The finding, asserted: with no translation the C inverse kinematics adds
-    // the same `d * omega` to each wheel, so the three targets are identical -
-    // and a rotation cannot be, because the wheels sit at different angles. The
-    // end-to-end commands still differ (the wheels measured different speeds),
-    // which is why this is asserted on the targets rather than on the commands.
+    // Pure rotation: every wheel turns at d·omega. That looks like "the same
+    // target for all three" and REVIEW §36 read it as a translation - but with the
+    // wheels mounted tangentially it is exactly what a rotation does, because the
+    // three tangents point in three different directions. The forward kinematics
+    // below is what settles it: equal wheel speeds come back as omega and nothing
+    // else.
     const targets = od.currentWheelTargets();
     try std.testing.expectEqual(targets[0], targets[1]);
     try std.testing.expectEqual(targets[1], targets[2]);
     try std.testing.expectApproxEqAbs(@as(f32, 0.1), targets[0], 1.0e-6);
+
+    const back = forwardKinematics3(targets, od.wheel_distance);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), back.vx, round_trip_tolerance);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), back.vy, round_trip_tolerance);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), back.omega, round_trip_tolerance);
 
     // The run the corpus recorded, for the same scenario.
     var rot0: [3]f32 = undefined;
@@ -368,12 +430,30 @@ test "omni: pure rotation gives every wheel the same target" {
     try corpus.expectValues("omni3_pure_rotation_wheel1", &rot1);
     try corpus.expectValues("omni3_pure_rotation_wheel2", &rot2);
 
-    // Independent of the corpus: with the rotation term at zero the targets are
-    // the projection of the commanded velocity onto each wheel's direction.
+    // A wheel whose tangent is perpendicular to the commanded motion does not
+    // turn. Under the old radial projection wheel 0 - the one at angle zero, whose
+    // tangent is +y - was asked for the full vx, which no wheel in that position
+    // can deliver.
     var straight = testOmni3();
     straight.setVelocity(0.4, 0.0, 0.0);
     const projected = straight.currentWheelTargets();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), projected[0], 1.0e-6);
     for (@TypeOf(straight).wheel_angles, 0..) |angle, i| {
-        try std.testing.expectApproxEqAbs(0.4 * @cos(angle), projected[i], 1.0e-6);
+        try std.testing.expectApproxEqAbs(-0.4 * @sin(angle), projected[i], 1.0e-6);
+    }
+
+    // The property that makes the pair correct: every commanded velocity comes back
+    // out of the forward kinematics unchanged.
+    for ([_]struct { vx: f32, vy: f32, omega: f32 }{
+        .{ .vx = 0.4, .vy = 0.0, .omega = 0.0 },
+        .{ .vx = 0.0, .vy = 0.3, .omega = 0.0 },
+        .{ .vx = 0.3, .vy = 0.1, .omega = 0.2 },
+        .{ .vx = -0.25, .vy = 0.15, .omega = -0.5 },
+    }) |command| {
+        const w = od.wheelTargets(command.vx, command.vy, command.omega);
+        const round = forwardKinematics3(w, od.wheel_distance);
+        try std.testing.expectApproxEqAbs(command.vx, round.vx, round_trip_tolerance);
+        try std.testing.expectApproxEqAbs(command.vy, round.vy, round_trip_tolerance);
+        try std.testing.expectApproxEqAbs(command.omega, round.omega, round_trip_tolerance);
     }
 }
