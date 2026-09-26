@@ -44,3 +44,41 @@ vec4_dot 46
 vec4_length 13.1909056
 vec4_normalize_ok 1
 vec4_normalize 0.379049033 -0.45485884 0.530668616 0.606478453
+matrix_layout 72 4
+matrix_data_bytes 64
+matrix_init_2x3 0 0 0 0 0 0
+matrix_identity_3x3 1 0 0 0 1 0 0 0 1
+matrix_identity_2x3 1 0 0 0 1 0
+matrix_get_element 7.5
+matrix_get_out_of_range 0
+matrix_set_get_2x2 0 7.5 0 0
+matrix_set_out_of_range_2x2 0 7.5 0 0
+matrix_add_2x2_ok 1
+matrix_add_2x2 5 9 5 10
+matrix_subtract_2x2_ok 1
+matrix_subtract_2x2 3 5 -1 2
+matrix_multiply_2x2_ok 1
+matrix_multiply_2x2 25 36 20 28
+matrix_multiply_in_place_ok 1
+matrix_multiply_in_place_2x2 25 36 20 28
+matrix_multiply_2x3_3x2_ok 1
+matrix_multiply_2x3_3x2 58 64 139 154
+matrix_multiply_mismatch_ok 0
+matrix_scalar_multiply_3x2 -3 1.5 -0.75 -4.5 -6 3
+matrix_transpose_2x3 1 4 2 5 3 6
+matrix_transpose_in_place_3x3 1 4 7 2 5 8 3 6 9
+matrix_det_2x2 10
+matrix_det_3x3 1
+matrix_det_dispatch_2x2 10
+matrix_det_dispatch_3x3 1
+matrix_det_nonsquare 0
+matrix_det_4x4 0
+matrix_inverse_2x2_ok 1
+matrix_inverse_2x2 0.600000024 -0.699999988 -0.200000003 0.400000006
+matrix_inverse_3x3_ok 1
+matrix_inverse_3x3 -24 18 5 20 -15 -4 -5 4 1
+matrix_inverse_dispatch_2x2_ok 1
+matrix_inverse_dispatch_2x2 0.600000024 -0.699999988 -0.200000003 0.400000006
+matrix_inverse_4x4_ok 0
+matrix_inverse_singular_ok 0
+matrix_inverse_singular_untouched 1 2 3 4

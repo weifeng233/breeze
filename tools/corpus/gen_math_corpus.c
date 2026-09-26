@@ -21,13 +21,14 @@
  * fixture loses nothing, so a mismatch is a real difference and not a printing
  * artefact.
  *
- * Cases are added module by module as the migration proceeds. vector is done;
- * matrix, quaternion and interpolation follow.
+ * Cases are added module by module as the migration proceeds. vector and matrix
+ * are done; quaternion and interpolation follow.
  */
 
 #include <stddef.h>
 #include <stdio.h>
 
+#include "../../include/breeze/math/matrix.h"
 #include "../../include/breeze/math/vector.h"
 
 /* One printer per arity keeps `main` a readable list of cases. */
@@ -50,6 +51,28 @@ static void pf(const char* name, float v) {
 
 static void pi(const char* name, int v) {
     printf("%s %d\n", name, v);
+}
+
+/* A matrix prints its *used* region row-major, and the shape lives in the case
+ * name (`matrix_add_2x2`) rather than in the data. The Zig type carries its
+ * shape at compile time, so printing rows and cols as values would be comparing
+ * a compile-time fact against itself; what needs checking is the arithmetic. */
+static void pm(const char* name, const BreezeMatrix* m) {
+    int i, j;
+    printf("%s", name);
+    for (i = 0; i < m->rows; i++) {
+        for (j = 0; j < m->cols; j++) printf(" %.9g", (double)m->data[i][j]);
+    }
+    putchar('\n');
+}
+
+/* Row-major fill, so each case reads as the matrix it is about. */
+static void setm(BreezeMatrix* m, int rows, int cols, const float* values) {
+    int i, j, k = 0;
+    BreezeMatrix_Init(m, rows, cols);
+    for (i = 0; i < rows; i++) {
+        for (j = 0; j < cols; j++) m->data[i][j] = values[k++];
+    }
 }
 
 int main(void) {
@@ -177,6 +200,123 @@ int main(void) {
 
     pi("vec4_normalize_ok", BreezeVector4D_Normalize(&r4, &b4));
     p4("vec4_normalize", r4);
+
+    /* --- matrix ---------------------------------------------------------- */
+    BreezeMatrix ma, mr;
+
+    /* Determinant 1, and its inverse is the textbook integer matrix
+     * [[-24,18,5],[20,-15,-4],[-5,4,1]] - exact in float, so a mismatch here is
+     * the port's fault and not rounding. */
+    const float b3v[] = {1.0f, 2.0f, 3.0f, 0.0f, 1.0f, 4.0f, 5.0f, 6.0f, 0.0f};
+    BreezeMatrix b3m, four4;
+    setm(&b3m, 3, 3, b3v);
+    setm(&four4, 4, 4, (const float[]){1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+                                       0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f});
+
+    printf("matrix_layout %zu %zu\n", sizeof ma, _Alignof(BreezeMatrix));
+    printf("matrix_data_bytes %zu\n", sizeof ma.data);
+
+    /* Init zeroes only the used region - the storage beyond it is left alone,
+     * which is a property the Zig type cannot have because it has no storage
+     * beyond its shape. Captured here so the difference is on the record. */
+    BreezeMatrix_Init(&ma, 2, 3);
+    pm("matrix_init_2x3", &ma);
+
+    BreezeMatrix_Init(&ma, 3, 3);
+    BreezeMatrix_SetIdentity(&ma);
+    pm("matrix_identity_3x3", &ma);
+
+    /* Non-square identity: the C code fills ones only out to min(rows, cols). */
+    BreezeMatrix_Init(&ma, 2, 3);
+    BreezeMatrix_SetIdentity(&ma);
+    pm("matrix_identity_2x3", &ma);
+
+    BreezeMatrix_Init(&ma, 2, 2);
+    BreezeMatrix_SetElement(&ma, 0, 1, 7.5f);
+    pf("matrix_get_element", BreezeMatrix_GetElement(&ma, 0, 1));
+    pf("matrix_get_out_of_range", BreezeMatrix_GetElement(&ma, 5, 0));
+    pm("matrix_set_get_2x2", &ma);
+    BreezeMatrix_SetElement(&ma, 9, 9, 1.0f); /* silently ignored */
+    pm("matrix_set_out_of_range_2x2", &ma);
+
+    const float a2v[] = {4.0f, 7.0f, 2.0f, 6.0f};
+    const float b2v[] = {1.0f, 2.0f, 3.0f, 4.0f};
+    const float singv[] = {1.0f, 2.0f, 2.0f, 4.0f};
+    BreezeMatrix ma2, mb2, msing;
+    setm(&ma2, 2, 2, a2v);
+    setm(&mb2, 2, 2, b2v);
+    setm(&msing, 2, 2, singv);
+
+    pi("matrix_add_2x2_ok", BreezeMatrix_Add(&mr, &ma2, &mb2));
+    pm("matrix_add_2x2", &mr);
+
+    pi("matrix_subtract_2x2_ok", BreezeMatrix_Subtract(&mr, &ma2, &mb2));
+    pm("matrix_subtract_2x2", &mr);
+
+    pi("matrix_multiply_2x2_ok", BreezeMatrix_Multiply(&mr, &ma2, &mb2));
+    pm("matrix_multiply_2x2", &mr);
+
+    /* In place, which the C version supports on purpose (it multiplies into a
+     * temporary precisely so that result may alias an input). */
+    setm(&mr, 2, 2, a2v);
+    pi("matrix_multiply_in_place_ok", BreezeMatrix_Multiply(&mr, &mr, &mb2));
+    pm("matrix_multiply_in_place_2x2", &mr);
+
+    const float pv[] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};    /* 2x3 */
+    const float qv[] = {7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f};  /* 3x2 */
+    BreezeMatrix p, q, r;
+    setm(&p, 2, 3, pv);
+    setm(&q, 3, 2, qv);
+
+    pi("matrix_multiply_2x3_3x2_ok", BreezeMatrix_Multiply(&r, &p, &q));
+    pm("matrix_multiply_2x3_3x2", &r);
+
+    /* Inner dimensions disagree: the C version refuses and says so in its
+     * return value. The Zig signature makes this unrepresentable. */
+    setm(&r, 2, 2, b2v);
+    pi("matrix_multiply_mismatch_ok", BreezeMatrix_Multiply(&r, &ma2, &q));
+
+    const float sv[] = {2.0f, -1.0f, 0.5f, 3.0f, 4.0f, -2.0f}; /* 3x2 */
+    BreezeMatrix s;
+    setm(&s, 3, 2, sv);
+    BreezeMatrix_ScalarMultiply(&r, &s, -1.5f);
+    pm("matrix_scalar_multiply_3x2", &r);
+
+    BreezeMatrix_Transpose(&r, &p);
+    pm("matrix_transpose_2x3", &r);
+
+    /* In place again: transpose is where aliasing is easiest to get wrong. */
+    setm(&r, 3, 3, (const float[]){1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f});
+    BreezeMatrix_Transpose(&r, &r);
+    pm("matrix_transpose_in_place_3x3", &r);
+
+    pf("matrix_det_2x2", BreezeMatrix_Determinant2x2(&ma2));
+    pf("matrix_det_3x3", BreezeMatrix_Determinant3x3(&b3m));
+    pf("matrix_det_dispatch_2x2", BreezeMatrix_Determinant(&ma2));
+    pf("matrix_det_dispatch_3x3", BreezeMatrix_Determinant(&b3m));
+    /* Not square: refused. */
+    pf("matrix_det_nonsquare", BreezeMatrix_Determinant(&p));
+    /* Square but unsupported: the C code returns 0 rather than computing it.
+     * The port makes this a compile error instead, so no Zig case reads this. */
+    pf("matrix_det_4x4", BreezeMatrix_Determinant(&four4));
+
+    pi("matrix_inverse_2x2_ok", BreezeMatrix_Inverse2x2(&mr, &ma2));
+    pm("matrix_inverse_2x2", &mr);
+
+    pi("matrix_inverse_3x3_ok", BreezeMatrix_Inverse3x3(&mr, &b3m));
+    pm("matrix_inverse_3x3", &mr);
+
+    pi("matrix_inverse_dispatch_2x2_ok", BreezeMatrix_Inverse(&mr, &ma2));
+    pm("matrix_inverse_dispatch_2x2", &mr);
+
+    pi("matrix_inverse_4x4_ok", BreezeMatrix_Inverse(&mr, &four4));
+
+    /* Singular: refused, and - because the refusal happens before the write -
+     * the caller's result is untouched. The Zig port returns an error instead,
+     * so what is checked there is the error, not the untouched buffer. */
+    setm(&mr, 2, 2, b2v);
+    pi("matrix_inverse_singular_ok", BreezeMatrix_Inverse2x2(&mr, &msing));
+    pm("matrix_inverse_singular_untouched", &mr);
 
     return 0;
 }

@@ -23,9 +23,9 @@ const std = @import("std");
 /// The committed corpus, verbatim.
 pub const text = @embedFile("testdata/math_corpus.txt");
 
-/// The widest case in the file (a 4D vector). `check-c.ps1` notices if a case
-/// ever grows past this rather than truncating it silently.
-pub const max_values = 4;
+/// The widest case in the file: a 4x4 matrix. Raising this is expected as
+/// modules are added - the parser says which case overflowed if it is not enough.
+pub const max_values = 16;
 
 pub const max_cases = 512;
 
@@ -65,7 +65,13 @@ pub const Corpus = struct {
             var fields = std.mem.tokenizeScalar(u8, line, ' ');
             var entry = Entry{ .name = fields.next() orelse continue };
             while (fields.next()) |field| {
-                if (entry.len == max_values) return Error.TooManyValues;
+                if (entry.len == max_values) {
+                    std.debug.print(
+                        "corpus case '{s}' has more than {d} values; raise Corpus.max_values\n",
+                        .{ entry.name, max_values },
+                    );
+                    return Error.TooManyValues;
+                }
                 entry.values[entry.len] = std.fmt.parseFloat(f32, field) catch return Error.NotANumber;
                 entry.len += 1;
             }
