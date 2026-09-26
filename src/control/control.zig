@@ -14,6 +14,7 @@ const std = @import("std");
 pub const pid = @import("pid.zig");
 pub const state_feedback = @import("state_feedback.zig");
 pub const platform = @import("platform.zig");
+pub const omni = @import("omni.zig");
 
 pub const Pid = pid.Pid;
 pub const PidKind = pid.Kind;
@@ -21,6 +22,8 @@ pub const StateFeedback = state_feedback.StateFeedback;
 pub const DifferentialDrive = platform.DifferentialDrive;
 pub const DifferentialConfig = platform.DifferentialConfig;
 pub const ImuData = platform.ImuData;
+pub const OmniDrive = omni.OmniDrive;
+pub const OmniKind = omni.OmniKind;
 
 test {
     std.testing.refAllDecls(@This());

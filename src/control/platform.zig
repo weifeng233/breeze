@@ -36,7 +36,7 @@ pub const platform_doc =
     \\  pub fn readEncoder(encoder_id: i32, reset: bool) f32
 ;
 
-fn requirePlatform(comptime Platform: type) void {
+pub fn requirePlatform(comptime Platform: type) void {
     if (!@hasDecl(Platform, "setMotor")) {
         @compileError("platform '" ++ @typeName(Platform) ++ "' must declare setMotor(motor_id: i32, speed: f32) void");
     }

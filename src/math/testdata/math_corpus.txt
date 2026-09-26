@@ -267,3 +267,29 @@ diffdrive_setparams_left_kp 2
 diffdrive_setparams_right_kd 0.25
 diffdrive_update_tuned_left -0.840870976 -1 1
 diffdrive_update_tuned_right -1 0.52121675 -1
+omni3_num_wheels 3
+omni3_angles 0 2.09439349 4.18878698
+omni3_wheel_radius 0.0299999993
+omni3_pid_kp 1
+omni3_pid_output_max 1
+omni3_target_vx_init 0
+omni3_target_vx 0.5
+omni3_clamped_vx 0.600000024
+omni3_clamped_vy 0.800000012
+omni3_angular_clamped 3
+omni3_encoder_to_speed 18.8495407
+omni3_setparams_ki 0.200000003
+omni3_run_wheel0 -1 -0.773991466 0.620609999
+omni3_run_wheel1 -1 -0.34716174 -1
+omni3_run_wheel2 -1 -0.502135336 -1
+omni3_motor_id_0 11
+omni3_motor_id_2 13
+omni3_rescaled_targets 1 -0.153845072 -0.153848305
+omni3_unclamped_velocity 1 3
+omni3_pure_rotation_wheel0 -1 -0.711329341 0.0234504938
+omni3_pure_rotation_wheel1 -1 -0.296639502 -0.843741298
+omni3_pure_rotation_wheel2 -1 -0.277752101 -0.824835181
+omni4_num_wheels 4
+omni4_angles 0.78539753 2.35619259 3.92698765 5.49778271
+omni4_run_wheel3 -1 -0.249975622 -0.118334576
+omni4_motor_id_3 14

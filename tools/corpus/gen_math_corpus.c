@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include "../../include/breeze/control/platform/differential_drive.h"
+#include "../../include/breeze/control/platform/omni_drive.h"
 #include "../../include/breeze/control/pid_controller.h"
 #include "../../include/breeze/control/state_feedback_controller.h"
 #include "../../include/breeze/filter/complementary_filter.h"
@@ -106,32 +107,38 @@ static void pbytes(const char* name, const unsigned char* bytes, int n) {
  * what they command means supplying our own. These live here rather than in the
  * case list so the cases read as a scenario. */
 
-static float g_motor_speed[2];
-static int g_motor_id[2];
+/* Four slots, because the omni and mecanum platforms have up to four wheels. */
+static float g_motor_speed[4];
+static int g_motor_id[4];
 static int g_motor_calls;
 static int g_encoder_step;
 static int g_encoder_reset;
 
 static void fake_set_motor(int motor_id, float speed) {
-    if (g_motor_calls < 2) {
+    if (g_motor_calls < 4) {
         g_motor_id[g_motor_calls] = motor_id;
         g_motor_speed[g_motor_calls] = speed;
     }
     g_motor_calls++;
 }
 
+/* One scripted sequence per encoder id, indexed by the *pass* - which the case
+ * sets before each Update. Advancing a counter inside here would depend on how
+ * many wheels a platform reads, and the wheel counts differ. */
 static float fake_get_encoder(int encoder_id, int reset) {
     /* Counts chosen so the wheel speeds land near the target: one count is
      * 2*pi*r/resolution/dt = 0.01885 m/s, so ~26 counts is ~0.5 m/s. Values that
      * saturate the PID would only exercise the clamp. */
-    static const float left[3] = {25.0f, 28.0f, 24.0f};
-    static const float right[3] = {27.0f, 26.0f, 30.0f};
+    static const float seq[4][3] = {
+        {25.0f, 28.0f, 24.0f},
+        {27.0f, 26.0f, 30.0f},
+        {26.0f, 25.0f, 29.0f},
+        {28.0f, 27.0f, 25.0f},
+    };
     g_encoder_reset = reset;   /* recorded, because nothing else would check it */
 
-    float value = encoder_id == 1 ? left[g_encoder_step % 3] : right[g_encoder_step % 3];
-    /* The controller reads left then right; advance after the second. */
-    if (encoder_id != 1) g_encoder_step++;
-    return value;
+    int idx = (encoder_id >= 1 && encoder_id <= 4) ? encoder_id - 1 : 0;
+    return seq[idx][g_encoder_step % 3];
 }
 
 /* A matrix prints its *used* region row-major, and the shape lives in the case
@@ -970,6 +977,7 @@ int main(void) {
     float right_cmd[3];
     for (step_i = 0; step_i < 3; step_i++) {
         g_motor_calls = 0;   /* reset per pass, or every pass records the first */
+        g_encoder_step = step_i;
         BreezeDifferentialDrive_Update(&dd);
         left_cmd[step_i] = g_motor_speed[0];
         right_cmd[step_i] = g_motor_speed[1];
@@ -994,12 +1002,128 @@ int main(void) {
     g_encoder_step = 0;
     for (step_i = 0; step_i < 3; step_i++) {
         g_motor_calls = 0;
+        g_encoder_step = step_i;
         BreezeDifferentialDrive_Update(&ddt);
         left_cmd[step_i] = g_motor_speed[0];
         right_cmd[step_i] = g_motor_speed[1];
     }
     pvals("diffdrive_update_tuned_left", left_cmd, 3);
     pvals("diffdrive_update_tuned_right", right_cmd, 3);
+
+    /* --- omni drive: three wheels and four --------------------------------- */
+    BreezeOmniDrive omni;
+    int omni_motors[4] = {11, 12, 13, 14};
+    int omni_encoders[4] = {1, 2, 3, 4};   /* the fake knows ids 1..4 */
+    float omni_w0[3];
+    float omni_w1[3];
+    float omni_w2[3];
+    float omni_w3[3];
+
+    BreezeOmniDrive_Init(&omni, BREEZE_OMNI_THREE_WHEEL_120DEG, 0.03f, 0.1f, 1.0f, 3.0f,
+                         omni_motors, omni_encoders, 1000.0f,
+                         fake_set_motor, fake_get_encoder, 0.01f);
+    pi("omni3_num_wheels", omni.config.num_wheels);
+    pvals("omni3_angles", omni.config.wheel_angles, 3);
+    pf("omni3_wheel_radius", omni.config.wheel_radius);
+    pf("omni3_pid_kp", omni.wheel_pid[0].kp);
+    pf("omni3_pid_output_max", omni.wheel_pid[0].output_max);
+    pf("omni3_target_vx_init", omni.target_vx);
+
+    BreezeOmniDrive_SetVelocity(&omni, 0.5f, 0.0f, 0.0f);
+    pf("omni3_target_vx", omni.target_vx);
+
+    /* The linear clamp is *radial*: (3, 4) has length 5, so both components
+     * scale by 0.2 and the direction is preserved. */
+    BreezeOmniDrive_SetVelocity(&omni, 3.0f, 4.0f, 0.0f);
+    pf("omni3_clamped_vx", omni.target_vx);
+    pf("omni3_clamped_vy", omni.target_vy);
+
+    /* The angular clamp is per component, as elsewhere. */
+    BreezeOmniDrive_SetVelocity(&omni, 0.0f, 0.0f, 9.0f);
+    pf("omni3_angular_clamped", omni.target_omega);
+
+    pf("omni3_encoder_to_speed", BreezeOmniDrive_EncoderToSpeed(&omni, 1000.0f));
+
+    BreezeOmniDrive_SetPIDParams(&omni, 1.0f, 0.2f, 0.1f);
+    pf("omni3_setparams_ki", omni.wheel_pid[2].ki);
+
+    BreezeOmniDrive_SetVelocity(&omni, 0.3f, 0.1f, 0.2f);
+    for (step_i = 0; step_i < 3; step_i++) {
+        g_motor_calls = 0;
+        g_encoder_step = step_i;
+        BreezeOmniDrive_Update(&omni);
+        omni_w0[step_i] = g_motor_speed[0];
+        omni_w1[step_i] = g_motor_speed[1];
+        omni_w2[step_i] = g_motor_speed[2];
+    }
+    pvals("omni3_run_wheel0", omni_w0, 3);
+    pvals("omni3_run_wheel1", omni_w1, 3);
+    pvals("omni3_run_wheel2", omni_w2, 3);
+    pi("omni3_motor_id_0", g_motor_id[0]);
+    pi("omni3_motor_id_2", g_motor_id[2]);
+
+    /* The per-wheel rescale, which the run above never reaches: at the maximum
+     * linear speed *and* full rotation the raw targets exceed the maximum, so
+     * every wheel is scaled down together. Read back through the PID setpoints,
+     * which is where `Update` puts the targets. */
+    BreezeOmniDrive omni_fast;
+    BreezeOmniDrive_Init(&omni_fast, BREEZE_OMNI_THREE_WHEEL_120DEG, 0.03f, 0.1f, 1.0f, 3.0f,
+                         omni_motors, omni_encoders, 1000.0f,
+                         fake_set_motor, fake_get_encoder, 0.01f);
+    BreezeOmniDrive_SetVelocity(&omni_fast, 1.0f, 0.0f, 3.0f);
+    g_motor_calls = 0;
+    g_encoder_step = 0;
+    BreezeOmniDrive_Update(&omni_fast);
+    const float rescaled[3] = {
+        omni_fast.wheel_pid[0].setpoint,
+        omni_fast.wheel_pid[1].setpoint,
+        omni_fast.wheel_pid[2].setpoint,
+    };
+    pvals("omni3_rescaled_targets", rescaled, 3);
+    pvals("omni3_unclamped_velocity", (const float[]){omni_fast.target_vx, omni_fast.target_omega}, 2);
+
+    /* Pure rotation. The C inverse kinematics adds the same
+     * `wheel_distance * omega` to *every* wheel, so all three targets come out
+     * equal - which is not what a rotation does when the wheels sit at
+     * different angles. Recorded, not corrected: the port reproduces it and the
+     * Zig test asserts the equality so the behaviour is pinned (REVIEW §36). */
+    BreezeOmniDrive omni_rot;
+    BreezeOmniDrive_Init(&omni_rot, BREEZE_OMNI_THREE_WHEEL_120DEG, 0.03f, 0.1f, 1.0f, 3.0f,
+                         omni_motors, omni_encoders, 1000.0f,
+                         fake_set_motor, fake_get_encoder, 0.01f);
+    BreezeOmniDrive_SetVelocity(&omni_rot, 0.0f, 0.0f, 1.0f);
+    float rot0[3];
+    float rot1[3];
+    float rot2[3];
+    for (step_i = 0; step_i < 3; step_i++) {
+        g_motor_calls = 0;
+        g_encoder_step = step_i;
+        BreezeOmniDrive_Update(&omni_rot);
+        rot0[step_i] = g_motor_speed[0];
+        rot1[step_i] = g_motor_speed[1];
+        rot2[step_i] = g_motor_speed[2];
+    }
+    pvals("omni3_pure_rotation_wheel0", rot0, 3);
+    pvals("omni3_pure_rotation_wheel1", rot1, 3);
+    pvals("omni3_pure_rotation_wheel2", rot2, 3);
+
+    /* Four wheels, 90 degrees apart. */
+    BreezeOmniDrive omni4;
+    BreezeOmniDrive_Init(&omni4, BREEZE_OMNI_FOUR_WHEEL_90DEG, 0.03f, 0.12f, 1.0f, 3.0f,
+                         omni_motors, omni_encoders, 1000.0f,
+                         fake_set_motor, fake_get_encoder, 0.01f);
+    pi("omni4_num_wheels", omni4.config.num_wheels);
+    pvals("omni4_angles", omni4.config.wheel_angles, 4);
+
+    BreezeOmniDrive_SetVelocity(&omni4, 0.3f, 0.1f, 0.2f);
+    for (step_i = 0; step_i < 3; step_i++) {
+        g_motor_calls = 0;
+        g_encoder_step = step_i;
+        BreezeOmniDrive_Update(&omni4);
+        omni_w3[step_i] = g_motor_speed[3];
+    }
+    pvals("omni4_run_wheel3", omni_w3, 3);
+    pi("omni4_motor_id_3", g_motor_id[3]);
 
     return 0;
 }
