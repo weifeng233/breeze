@@ -137,6 +137,18 @@ pub const Corpus = struct {
     /// enough that a real mistake - a swapped axis, a missing term - cannot hide
     /// inside it.
     pub fn expectClose(_: *const Corpus, name: []const u8, index: usize, want: f32, actual: f32) Error!void {
+        // NaN has to be rejected before the comparison, not by it: every
+        // comparison with NaN is false, so `|want - actual| > tolerance` is
+        // false and a NaN would pass as a match. A probe found this - removing a
+        // guard that prevented a 0/0 left every test green.
+        if (std.math.isNan(want) or std.math.isNan(actual)) {
+            std.debug.print(
+                "corpus case '{s}'[{d}]: NaN on one side (C says {d}, port says {d})\n",
+                .{ name, index, want, actual },
+            );
+            return Error.ValueMismatch;
+        }
+
         const scale = @max(@abs(want), @abs(actual));
         const tolerance: f32 = @max(1.0e-6, scale * 1.0e-6);
         if (@abs(want - actual) > tolerance) {

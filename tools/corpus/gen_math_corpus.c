@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include "../../include/breeze/control/adaptive_controller.h"
+#include "../../include/breeze/control/fuzzy_controller.h"
 #include "../../include/breeze/control/platform/balance_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
@@ -1498,6 +1499,82 @@ int main(void) {
     pvals("balance_tilt_right", bal_right, 5);
     pf("balance_tilt_angle_after", bal_tilt.current_angle);
     g_imu_tilt = 0;
+
+    /* --- fuzzy controller --------------------------------------------------- */
+    /* Three sets per variable, the classic 3x3 error/rate table. */
+    BreezeFuzzyMembership fuzzy_sets[3] = {
+        {BREEZE_FUZZY_TRIANGULAR, {-1.0f, -1.0f, 0.0f}, "NEG"},
+        {BREEZE_FUZZY_TRIANGULAR, {-1.0f, 0.0f, 1.0f}, "ZERO"},
+        {BREEZE_FUZZY_TRIANGULAR, {0.0f, 1.0f, 1.0f}, "POS"},
+    };
+    BreezeFuzzyRule fuzzy_rules[9] = {
+        {0, 0, 0}, {0, 1, 0}, {0, 2, 1},
+        {1, 0, 0}, {1, 1, 1}, {1, 2, 2},
+        {2, 0, 1}, {2, 1, 2}, {2, 2, 2},
+    };
+    BreezeFuzzyController fz;
+
+    BreezeFuzzyController_Init(&fz, -1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f, 5);
+    BreezeFuzzyController_SetInput1Memberships(&fz, fuzzy_sets, 3);
+    BreezeFuzzyController_SetInput2Memberships(&fz, fuzzy_sets, 3);
+    BreezeFuzzyController_SetOutputMemberships(&fz, fuzzy_sets, 3);
+    BreezeFuzzyController_SetRules(&fz, fuzzy_rules, 9);
+
+    pf("fuzzy_input1_min", fz.input1_min);
+    pf("fuzzy_discretization_level", (float)fz.discretization_level);
+
+    /* Membership functions, including the boundaries where the branches change. */
+    pf("fuzzy_tri_left", BreezeFuzzyController_TriangularMembership(-0.5f, -1.0f, 0.0f, 1.0f));
+    pf("fuzzy_tri_centre", BreezeFuzzyController_TriangularMembership(0.0f, -1.0f, 0.0f, 1.0f));
+    pf("fuzzy_tri_right", BreezeFuzzyController_TriangularMembership(0.5f, -1.0f, 0.0f, 1.0f));
+    pf("fuzzy_tri_at_a", BreezeFuzzyController_TriangularMembership(-1.0f, -1.0f, 0.0f, 1.0f));
+    pf("fuzzy_tri_at_c", BreezeFuzzyController_TriangularMembership(1.0f, -1.0f, 0.0f, 1.0f));
+    /* A degenerate triangle, where b == a: the left branch divides by zero. */
+    pf("fuzzy_tri_degenerate", BreezeFuzzyController_TriangularMembership(-1.0f, -1.0f, -1.0f, 1.0f));
+
+    pf("fuzzy_trap_left", BreezeFuzzyController_TrapezoidalMembership(0.1f, 0.0f, 0.2f, 0.5f, 1.0f));
+    pf("fuzzy_trap_shoulder", BreezeFuzzyController_TrapezoidalMembership(0.3f, 0.0f, 0.2f, 0.5f, 1.0f));
+    pf("fuzzy_trap_right", BreezeFuzzyController_TrapezoidalMembership(0.75f, 0.0f, 0.2f, 0.5f, 1.0f));
+
+    pf("fuzzy_gauss_centre", BreezeFuzzyController_GaussianMembership(0.0f, 0.0f, 0.5f));
+    pf("fuzzy_gauss_one_sigma", BreezeFuzzyController_GaussianMembership(0.5f, 0.0f, 0.5f));
+    pf("fuzzy_gauss_far", BreezeFuzzyController_GaussianMembership(2.0f, 0.0f, 0.5f));
+
+    /* The grid the first compute call builds, printed while it exists. */
+    (void)BreezeFuzzyController_Compute(&fz, 0.0f, 0.0f);
+    pvals("fuzzy_grid", fz.output_discretization, 5);
+
+    /* The centroid over the rule table. */
+    pf("fuzzy_compute_zero", BreezeFuzzyController_Compute(&fz, 0.0f, 0.0f));
+    pf("fuzzy_compute_pos_pos", BreezeFuzzyController_Compute(&fz, 0.8f, 0.8f));
+    pf("fuzzy_compute_neg_neg", BreezeFuzzyController_Compute(&fz, -0.8f, -0.8f));
+    pf("fuzzy_compute_mixed", BreezeFuzzyController_Compute(&fz, 0.5f, -0.5f));
+    /* Inputs outside the range are clamped to it. */
+    pf("fuzzy_compute_clamped_high", BreezeFuzzyController_Compute(&fz, 9.0f, 9.0f));
+    pf("fuzzy_compute_clamped_low", BreezeFuzzyController_Compute(&fz, -9.0f, -9.0f));
+
+    /* No rules: the C returns 0 before allocating anything. */
+    BreezeFuzzyController fz_bare;
+    BreezeFuzzyController_Init(&fz_bare, -1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f, 5);
+    pf("fuzzy_compute_no_rules", BreezeFuzzyController_Compute(&fz_bare, 0.5f, 0.5f));
+    pi("fuzzy_no_rules_grid_allocated", fz_bare.output_discretization != NULL);
+
+    /* A rule whose output set is entirely outside the output range: every grid
+     * point has zero membership, so the denominator stays zero and the C answers
+     * with the midpoint of the output range. */
+    BreezeFuzzyMembership fuzzy_far[1] = {
+        {BREEZE_FUZZY_TRIANGULAR, {5.0f, 6.0f, 7.0f}, "FAR"},
+    };
+    BreezeFuzzyController fz_far;
+    BreezeFuzzyController_Init(&fz_far, -1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f, 5);
+    BreezeFuzzyController_SetInput1Memberships(&fz_far, fuzzy_sets, 3);
+    BreezeFuzzyController_SetInput2Memberships(&fz_far, fuzzy_sets, 3);
+    BreezeFuzzyController_SetOutputMemberships(&fz_far, fuzzy_far, 1);
+    BreezeFuzzyController_SetRules(&fz_far, fuzzy_rules, 1);
+    pf("fuzzy_compute_empty_consequent", BreezeFuzzyController_Compute(&fz_far, 0.5f, 0.5f));
+
+    BreezeFuzzyController_Free(&fz);
+    pi("fuzzy_grid_freed", fz.output_discretization == NULL);
 
     return 0;
 }

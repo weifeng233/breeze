@@ -399,3 +399,28 @@ balance_tilt_ok 1 1 1 1 0
 balance_tilt_left -0.748672843 -1 -0.5 -0.748672843 0
 balance_tilt_right -1 -0.748672843 -1 -1 0
 balance_tilt_angle_after 0.546248436
+fuzzy_input1_min -1
+fuzzy_discretization_level 5
+fuzzy_tri_left 0.5
+fuzzy_tri_centre 1
+fuzzy_tri_right 0.5
+fuzzy_tri_at_a 0
+fuzzy_tri_at_c 0
+fuzzy_tri_degenerate 0
+fuzzy_trap_left 0.5
+fuzzy_trap_shoulder 1
+fuzzy_trap_right 0.5
+fuzzy_gauss_centre 1
+fuzzy_gauss_one_sigma 0.606530666
+fuzzy_gauss_far 0.000335462624
+fuzzy_grid -1 -0.5 0 0.5 1
+fuzzy_compute_zero 0
+fuzzy_compute_pos_pos 0.166666672
+fuzzy_compute_neg_neg -0.166666672
+fuzzy_compute_mixed 0
+fuzzy_compute_clamped_high 0
+fuzzy_compute_clamped_low 0
+fuzzy_compute_no_rules 0
+fuzzy_no_rules_grid_allocated 0
+fuzzy_compute_empty_consequent 0
+fuzzy_grid_freed 1

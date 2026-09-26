@@ -18,6 +18,7 @@ pub const omni = @import("omni.zig");
 pub const mecanum = @import("mecanum.zig");
 pub const adaptive = @import("adaptive.zig");
 pub const balance = @import("balance.zig");
+pub const fuzzy = @import("fuzzy.zig");
 pub const ackermann = @import("ackermann.zig");
 
 pub const Pid = pid.Pid;
@@ -36,6 +37,9 @@ pub const Mrac = adaptive.Mrac;
 pub const AdaptivePid = adaptive.AdaptivePid;
 pub const BalanceController = balance.BalanceController;
 pub const BalanceError = balance.Error;
+pub const Fuzzy = fuzzy.Fuzzy;
+pub const FuzzyMembership = fuzzy.Membership;
+pub const FuzzyRule = fuzzy.Rule;
 
 test {
     std.testing.refAllDecls(@This());
