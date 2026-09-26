@@ -71,7 +71,7 @@ typedef struct {
  * @param get_encoder 编码器读取函数
  * @param dt 控制循环时间步长（秒）
  */
-static void BreezeOmniDrive_Init(
+static inline void BreezeOmniDrive_Init(
     BreezeOmniDrive* controller,
     BreezeOmniDriveType config_type,
     float wheel_radius,
@@ -142,7 +142,7 @@ static void BreezeOmniDrive_Init(
  * @param ki 积分增益
  * @param kd 微分增益
  */
-static void BreezeOmniDrive_SetPIDParams(
+static inline void BreezeOmniDrive_SetPIDParams(
     BreezeOmniDrive* controller,
     float kp, float ki, float kd
 ) {
@@ -165,7 +165,7 @@ static void BreezeOmniDrive_SetPIDParams(
  * @param vy 目标Y方向速度（米/秒，左侧为正）
  * @param omega 目标角速度（弧度/秒，逆时针为正）
  */
-static void BreezeOmniDrive_SetVelocity(
+static inline void BreezeOmniDrive_SetVelocity(
     BreezeOmniDrive* controller,
     float vx, float vy, float omega
 ) {
@@ -198,7 +198,7 @@ static void BreezeOmniDrive_SetVelocity(
  * @param encoder_counts 自上次更新以来的编码器计数
  * @return 轮速（米/秒）
  */
-static float BreezeOmniDrive_EncoderToSpeed(
+static inline float BreezeOmniDrive_EncoderToSpeed(
     BreezeOmniDrive* controller,
     float encoder_counts
 ) {
@@ -224,7 +224,7 @@ static float BreezeOmniDrive_EncoderToSpeed(
  *
  * @param controller 指向控制器结构体的指针
  */
-static void BreezeOmniDrive_Update(BreezeOmniDrive* controller) {
+static inline void BreezeOmniDrive_Update(BreezeOmniDrive* controller) {
     float wheel_target_speeds[4];
     float wheel_current_speeds[4];
     float wheel_outputs[4];

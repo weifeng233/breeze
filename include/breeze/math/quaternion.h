@@ -35,7 +35,7 @@ typedef struct {
  * @param y 虚部j
  * @param z 虚部k
  */
-static void BreezeQuaternion_Init(BreezeQuaternion* quaternion, float w, float x, float y, float z) {
+static inline void BreezeQuaternion_Init(BreezeQuaternion* quaternion, float w, float x, float y, float z) {
     if (!quaternion) return;
     
     quaternion->w = w;
@@ -49,7 +49,7 @@ static void BreezeQuaternion_Init(BreezeQuaternion* quaternion, float w, float x
  *
  * @param quaternion 指向四元数结构体的指针
  */
-static void BreezeQuaternion_SetIdentity(BreezeQuaternion* quaternion) {
+static inline void BreezeQuaternion_SetIdentity(BreezeQuaternion* quaternion) {
     if (!quaternion) return;
     
     quaternion->w = 1.0f;
@@ -66,7 +66,7 @@ static void BreezeQuaternion_SetIdentity(BreezeQuaternion* quaternion) {
  * @param pitch 俯仰角（弧度）
  * @param yaw 航向角（弧度）
  */
-static void BreezeQuaternion_FromEulerZYX(BreezeQuaternion* quaternion, float roll, float pitch, float yaw) {
+static inline void BreezeQuaternion_FromEulerZYX(BreezeQuaternion* quaternion, float roll, float pitch, float yaw) {
     float cr, cp, cy, sr, sp, sy;
     float cpcy, spsy, cpsy, spcy;
     
@@ -100,7 +100,7 @@ static void BreezeQuaternion_FromEulerZYX(BreezeQuaternion* quaternion, float ro
  * @param axis 旋转轴（单位向量）
  * @param angle 旋转角度（弧度）
  */
-static void BreezeQuaternion_FromAxisAngle(BreezeQuaternion* quaternion, const BreezeVector3D* axis, float angle) {
+static inline void BreezeQuaternion_FromAxisAngle(BreezeQuaternion* quaternion, const BreezeVector3D* axis, float angle) {
     float half_angle;
     float sin_half_angle;
     BreezeVector3D normalized_axis;
@@ -130,7 +130,7 @@ static void BreezeQuaternion_FromAxisAngle(BreezeQuaternion* quaternion, const B
  * @param pitch 输出俯仰角（弧度）
  * @param yaw 输出航向角（弧度）
  */
-static void BreezeQuaternion_ToEulerZYX(const BreezeQuaternion* quaternion, float* roll, float* pitch, float* yaw) {
+static inline void BreezeQuaternion_ToEulerZYX(const BreezeQuaternion* quaternion, float* roll, float* pitch, float* yaw) {
     float sinr_cosp, cosr_cosp, sinp, siny_cosp, cosy_cosp;
     
     if (!quaternion || !roll || !pitch || !yaw) return;
@@ -169,7 +169,7 @@ static void BreezeQuaternion_ToEulerZYX(const BreezeQuaternion* quaternion, floa
  * @param quaternion 输入四元数
  * @return 四元数的模
  */
-static float BreezeQuaternion_Magnitude(const BreezeQuaternion* quaternion) {
+static inline float BreezeQuaternion_Magnitude(const BreezeQuaternion* quaternion) {
     if (!quaternion) return 0.0f;
     
     return sqrtf(quaternion->w * quaternion->w + 
@@ -185,7 +185,7 @@ static float BreezeQuaternion_Magnitude(const BreezeQuaternion* quaternion) {
  * @param quaternion 输入四元数
  * @return 成功返回1，失败返回0
  */
-static int BreezeQuaternion_Normalize(BreezeQuaternion* result, const BreezeQuaternion* quaternion) {
+static inline int BreezeQuaternion_Normalize(BreezeQuaternion* result, const BreezeQuaternion* quaternion) {
     float magnitude;
     
     if (!result || !quaternion) return 0;
@@ -208,7 +208,7 @@ static int BreezeQuaternion_Normalize(BreezeQuaternion* result, const BreezeQuat
  * @param result 结果四元数
  * @param quaternion 输入四元数
  */
-static void BreezeQuaternion_Conjugate(BreezeQuaternion* result, const BreezeQuaternion* quaternion) {
+static inline void BreezeQuaternion_Conjugate(BreezeQuaternion* result, const BreezeQuaternion* quaternion) {
     if (!result || !quaternion) return;
     
     result->w = quaternion->w;
@@ -224,7 +224,7 @@ static void BreezeQuaternion_Conjugate(BreezeQuaternion* result, const BreezeQua
  * @param quaternion 输入四元数
  * @return 成功返回1，失败返回0
  */
-static int BreezeQuaternion_Inverse(BreezeQuaternion* result, const BreezeQuaternion* quaternion) {
+static inline int BreezeQuaternion_Inverse(BreezeQuaternion* result, const BreezeQuaternion* quaternion) {
     float magnitude_squared;
     
     if (!result || !quaternion) return 0;
@@ -252,7 +252,7 @@ static int BreezeQuaternion_Inverse(BreezeQuaternion* result, const BreezeQuater
  * @param a 输入四元数A
  * @param b 输入四元数B
  */
-static void BreezeQuaternion_Multiply(BreezeQuaternion* result, const BreezeQuaternion* a, const BreezeQuaternion* b) {
+static inline void BreezeQuaternion_Multiply(BreezeQuaternion* result, const BreezeQuaternion* a, const BreezeQuaternion* b) {
     BreezeQuaternion temp;
     
     if (!result || !a || !b) return;
@@ -273,7 +273,7 @@ static void BreezeQuaternion_Multiply(BreezeQuaternion* result, const BreezeQuat
  * @param quaternion 旋转四元数（必须是单位四元数）
  * @param vector 输入向量
  */
-static void BreezeQuaternion_RotateVector(BreezeVector3D* result, const BreezeQuaternion* quaternion, const BreezeVector3D* vector) {
+static inline void BreezeQuaternion_RotateVector(BreezeVector3D* result, const BreezeQuaternion* quaternion, const BreezeVector3D* vector) {
     BreezeQuaternion vector_quaternion;
     BreezeQuaternion temp;
     BreezeQuaternion conjugate;
@@ -308,7 +308,7 @@ static void BreezeQuaternion_RotateVector(BreezeVector3D* result, const BreezeQu
  * @param b 结束四元数
  * @param t 插值参数（0.0到1.0）
  */
-static void BreezeQuaternion_Slerp(BreezeQuaternion* result, const BreezeQuaternion* a, const BreezeQuaternion* b, float t) {
+static inline void BreezeQuaternion_Slerp(BreezeQuaternion* result, const BreezeQuaternion* a, const BreezeQuaternion* b, float t) {
     float cos_half_theta;
     float half_theta;
     float sin_half_theta;

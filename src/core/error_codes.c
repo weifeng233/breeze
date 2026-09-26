@@ -6,6 +6,7 @@
  */
 
 #include "../../include/breeze/core/error_codes.h"
+#include <stddef.h>   /* NULL */
 
 /**
  * @brief Global error callback instance

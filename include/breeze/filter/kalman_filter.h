@@ -35,7 +35,7 @@ typedef struct {
  * @param p_init 初始估计误差协方差
  * @param x_init 初始状态估计值
  */
-static void BreezeKalmanFilter1D_Init(
+static inline void BreezeKalmanFilter1D_Init(
     BreezeKalmanFilter1D* filter,
     float q, float r,
     float p_init, float x_init
@@ -57,7 +57,7 @@ static void BreezeKalmanFilter1D_Init(
  * @param filter 指向滤波器结构体的指针
  * @param a 状态转移系数
  */
-static void BreezeKalmanFilter1D_SetStateTransition(BreezeKalmanFilter1D* filter, float a) {
+static inline void BreezeKalmanFilter1D_SetStateTransition(BreezeKalmanFilter1D* filter, float a) {
     if (filter) {
         filter->a = a;
     }
@@ -69,7 +69,7 @@ static void BreezeKalmanFilter1D_SetStateTransition(BreezeKalmanFilter1D* filter
  * @param filter 指向滤波器结构体的指针
  * @param h 测量系数
  */
-static void BreezeKalmanFilter1D_SetMeasurementCoefficient(BreezeKalmanFilter1D* filter, float h) {
+static inline void BreezeKalmanFilter1D_SetMeasurementCoefficient(BreezeKalmanFilter1D* filter, float h) {
     if (filter) {
         filter->h = h;
     }
@@ -82,7 +82,7 @@ static void BreezeKalmanFilter1D_SetMeasurementCoefficient(BreezeKalmanFilter1D*
  * @param measurement 新的测量值
  * @return 更新后的状态估计值
  */
-static float BreezeKalmanFilter1D_Update(BreezeKalmanFilter1D* filter, float measurement) {
+static inline float BreezeKalmanFilter1D_Update(BreezeKalmanFilter1D* filter, float measurement) {
     if (!filter) return 0.0f;
 
     /* 预测步骤 */
@@ -103,7 +103,7 @@ static float BreezeKalmanFilter1D_Update(BreezeKalmanFilter1D* filter, float mea
  * @param filter 指向滤波器结构体的指针
  * @return 当前状态估计值
  */
-static float BreezeKalmanFilter1D_GetState(const BreezeKalmanFilter1D* filter) {
+static inline float BreezeKalmanFilter1D_GetState(const BreezeKalmanFilter1D* filter) {
     return filter ? filter->x : 0.0f;
 }
 
@@ -113,7 +113,7 @@ static float BreezeKalmanFilter1D_GetState(const BreezeKalmanFilter1D* filter) {
  * @param filter 指向滤波器结构体的指针
  * @return 当前估计误差协方差
  */
-static float BreezeKalmanFilter1D_GetCovariance(const BreezeKalmanFilter1D* filter) {
+static inline float BreezeKalmanFilter1D_GetCovariance(const BreezeKalmanFilter1D* filter) {
     return filter ? filter->p : 0.0f;
 }
 
@@ -123,7 +123,7 @@ static float BreezeKalmanFilter1D_GetCovariance(const BreezeKalmanFilter1D* filt
  * @param filter 指向滤波器结构体的指针
  * @return 当前卡尔曼增益
  */
-static float BreezeKalmanFilter1D_GetGain(const BreezeKalmanFilter1D* filter) {
+static inline float BreezeKalmanFilter1D_GetGain(const BreezeKalmanFilter1D* filter) {
     return filter ? filter->k : 0.0f;
 }
 

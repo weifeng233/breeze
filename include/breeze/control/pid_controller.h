@@ -60,7 +60,7 @@ typedef struct {
  * @param output_min 输出最小值
  * @param output_max 输出最大值
  */
-static void BreezePIDController_Init(
+static inline void BreezePIDController_Init(
     BreezePIDController* pid,
     BreezePIDType type,
     float kp, float ki, float kd,
@@ -97,7 +97,7 @@ static void BreezePIDController_Init(
  * @param pid 指向PID控制器结构体的指针
  * @param alpha 滤波系数（0.0到1.0）- 值越低滤波效果越强
  */
-static void BreezePIDController_SetDerivativeFilter(BreezePIDController* pid, float alpha) {
+static inline void BreezePIDController_SetDerivativeFilter(BreezePIDController* pid, float alpha) {
     if (pid) {
         /* 将alpha限制在0和1之间 */
         if (alpha < 0.0f) alpha = 0.0f;
@@ -114,7 +114,7 @@ static void BreezePIDController_SetDerivativeFilter(BreezePIDController* pid, fl
  * @param integral_min 积分最小值
  * @param integral_max 积分最大值
  */
-static void BreezePIDController_SetIntegralLimits(
+static inline void BreezePIDController_SetIntegralLimits(
     BreezePIDController* pid,
     float integral_min, float integral_max
 ) {
@@ -130,7 +130,7 @@ static void BreezePIDController_SetIntegralLimits(
  * @param pid 指向PID控制器结构体的指针
  * @param setpoint 期望值
  */
-static void BreezePIDController_SetSetpoint(BreezePIDController* pid, float setpoint) {
+static inline void BreezePIDController_SetSetpoint(BreezePIDController* pid, float setpoint) {
     if (pid) {
         pid->setpoint = setpoint;
     }
@@ -141,7 +141,7 @@ static void BreezePIDController_SetSetpoint(BreezePIDController* pid, float setp
  *
  * @param pid 指向PID控制器结构体的指针
  */
-static void BreezePIDController_Reset(BreezePIDController* pid) {
+static inline void BreezePIDController_Reset(BreezePIDController* pid) {
     if (pid) {
         pid->integral = 0.0f;
         pid->prev_error = 0.0f;
@@ -158,7 +158,7 @@ static void BreezePIDController_Reset(BreezePIDController* pid) {
  * @param measurement 当前过程值
  * @return 控制输出
  */
-static float BreezePIDController_ComputePosition(BreezePIDController* pid, float measurement) {
+static inline float BreezePIDController_ComputePosition(BreezePIDController* pid, float measurement) {
     float error, p_term, i_term, d_term;
     float derivative, filtered_derivative;
     float output;
@@ -212,7 +212,7 @@ static float BreezePIDController_ComputePosition(BreezePIDController* pid, float
  * @param measurement 当前过程值
  * @return 需要添加到上一次输出的控制输出增量
  */
-static float BreezePIDController_ComputeIncremental(BreezePIDController* pid, float measurement) {
+static inline float BreezePIDController_ComputeIncremental(BreezePIDController* pid, float measurement) {
     float error, delta_u;
     float delta_p, delta_i, delta_d;
     float output;
@@ -257,7 +257,7 @@ static float BreezePIDController_ComputeIncremental(BreezePIDController* pid, fl
  * @param measurement 当前过程值
  * @return 控制输出
  */
-static float BreezePIDController_Compute(BreezePIDController* pid, float measurement) {
+static inline float BreezePIDController_Compute(BreezePIDController* pid, float measurement) {
     if (!pid) return 0.0f;
 
     if (pid->type == BREEZE_PID_POSITION) {

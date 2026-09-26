@@ -54,15 +54,13 @@ typedef struct {
  * @param get_encoder 编码器读取函数
  * @param dt 控制循环时间步长（秒）
  */
-static void BreezeDifferentialDrive_Init(
+static inline void BreezeDifferentialDrive_Init(
     BreezeDifferentialDrive* controller,
     BreezeDifferentialDriveConfig config,
     BreezeMotorControlFunc set_motor,
     BreezeEncoderFunc get_encoder,
     float dt
 ) {
-    float max_wheel_speed;
-
     if (!controller || !set_motor || !get_encoder) return;
 
     controller->config = config;
@@ -72,9 +70,11 @@ static void BreezeDifferentialDrive_Init(
     controller->target_angular_speed = 0.0f;
     controller->dt = dt;
 
-    /* 计算最大轮速 */
-    max_wheel_speed = config.max_linear_speed +
-                     (config.max_angular_speed * config.wheel_distance / 2.0f);
+    /* 这里原先还算了 max_wheel_speed = max_linear + max_angular * wheel_distance / 2，
+     * 但结果从未被使用：SetSpeed 只按 config 的两个最大速度裁剪线速度与角速度，
+     * Update 也不裁剪轮速。已删除该局部变量（无副作用，行为不变）。
+     * 若原意是"按最大轮速裁剪左右轮目标速度"，那是一处未实现的约束，
+     * 详见 docs/REVIEW.md。 */
 
     /* 初始化两个轮子的PID控制器 */
     BreezePIDController_Init(&controller->left_pid, BREEZE_PID_POSITION,
@@ -92,7 +92,7 @@ static void BreezeDifferentialDrive_Init(
  * @param ki 积分增益
  * @param kd 微分增益
  */
-static void BreezeDifferentialDrive_SetPIDParams(
+static inline void BreezeDifferentialDrive_SetPIDParams(
     BreezeDifferentialDrive* controller,
     float kp, float ki, float kd
 ) {
@@ -114,7 +114,7 @@ static void BreezeDifferentialDrive_SetPIDParams(
  * @param linear_speed 目标线速度（米/秒）
  * @param angular_speed 目标角速度（弧度/秒，正值=逆时针）
  */
-static void BreezeDifferentialDrive_SetSpeed(
+static inline void BreezeDifferentialDrive_SetSpeed(
     BreezeDifferentialDrive* controller,
     float linear_speed,
     float angular_speed
@@ -145,7 +145,7 @@ static void BreezeDifferentialDrive_SetSpeed(
  * @param encoder_counts 自上次更新以来的编码器计数
  * @return 轮速（米/秒）
  */
-static float BreezeDifferentialDrive_EncoderToSpeed(
+static inline float BreezeDifferentialDrive_EncoderToSpeed(
     BreezeDifferentialDrive* controller,
     float encoder_counts
 ) {
@@ -171,7 +171,7 @@ static float BreezeDifferentialDrive_EncoderToSpeed(
  *
  * @param controller 指向控制器结构体的指针
  */
-static void BreezeDifferentialDrive_Update(BreezeDifferentialDrive* controller) {
+static inline void BreezeDifferentialDrive_Update(BreezeDifferentialDrive* controller) {
     float left_target_speed, right_target_speed;
     float left_current_speed, right_current_speed;
     float left_encoder_counts, right_encoder_counts;

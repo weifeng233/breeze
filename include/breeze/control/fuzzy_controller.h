@@ -9,6 +9,10 @@
 #ifndef BREEZE_FUZZY_CONTROLLER_H
 #define BREEZE_FUZZY_CONTROLLER_H
 
+#include <math.h>    /* expf */
+#include <stddef.h>  /* NULL */
+#include <stdlib.h>  /* malloc, free */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -87,7 +91,7 @@ typedef struct {
  * @param output_max 输出的最大值
  * @param discretization_level 离散化级别（越高越精确，但计算量越大）
  */
-static void BreezeFuzzyController_Init(
+static inline void BreezeFuzzyController_Init(
     BreezeFuzzyController* controller,
     float input1_min, float input1_max,
     float input2_min, float input2_max,
@@ -126,7 +130,7 @@ static void BreezeFuzzyController_Init(
  * @param memberships 模糊集合数组
  * @param count 模糊集合数量
  */
-static void BreezeFuzzyController_SetInput1Memberships(
+static inline void BreezeFuzzyController_SetInput1Memberships(
     BreezeFuzzyController* controller,
     BreezeFuzzyMembership* memberships,
     int count
@@ -144,7 +148,7 @@ static void BreezeFuzzyController_SetInput1Memberships(
  * @param memberships 模糊集合数组
  * @param count 模糊集合数量
  */
-static void BreezeFuzzyController_SetInput2Memberships(
+static inline void BreezeFuzzyController_SetInput2Memberships(
     BreezeFuzzyController* controller,
     BreezeFuzzyMembership* memberships,
     int count
@@ -162,7 +166,7 @@ static void BreezeFuzzyController_SetInput2Memberships(
  * @param memberships 模糊集合数组
  * @param count 模糊集合数量
  */
-static void BreezeFuzzyController_SetOutputMemberships(
+static inline void BreezeFuzzyController_SetOutputMemberships(
     BreezeFuzzyController* controller,
     BreezeFuzzyMembership* memberships,
     int count
@@ -180,7 +184,7 @@ static void BreezeFuzzyController_SetOutputMemberships(
  * @param rules 规则数组
  * @param count 规则数量
  */
-static void BreezeFuzzyController_SetRules(
+static inline void BreezeFuzzyController_SetRules(
     BreezeFuzzyController* controller,
     BreezeFuzzyRule* rules,
     int count
@@ -200,7 +204,7 @@ static void BreezeFuzzyController_SetRules(
  * @param c 右边界
  * @return 隶属度（0.0到1.0）
  */
-static float BreezeFuzzyController_TriangularMembership(
+static inline float BreezeFuzzyController_TriangularMembership(
     float x, float a, float b, float c
 ) {
     if (x <= a || x >= c) return 0.0f;
@@ -218,7 +222,7 @@ static float BreezeFuzzyController_TriangularMembership(
  * @param d 右边界
  * @return 隶属度（0.0到1.0）
  */
-static float BreezeFuzzyController_TrapezoidalMembership(
+static inline float BreezeFuzzyController_TrapezoidalMembership(
     float x, float a, float b, float c, float d
 ) {
     if (x <= a || x >= d) return 0.0f;
@@ -235,7 +239,7 @@ static float BreezeFuzzyController_TrapezoidalMembership(
  * @param sigma 标准差
  * @return 隶属度（0.0到1.0）
  */
-static float BreezeFuzzyController_GaussianMembership(
+static inline float BreezeFuzzyController_GaussianMembership(
     float x, float c, float sigma
 ) {
     float temp = (x - c) / sigma;
@@ -249,7 +253,7 @@ static float BreezeFuzzyController_GaussianMembership(
  * @param x 输入值
  * @return 隶属度（0.0到1.0）
  */
-static float BreezeFuzzyController_CalculateMembership(
+static inline float BreezeFuzzyController_CalculateMembership(
     const BreezeFuzzyMembership* membership,
     float x
 ) {
@@ -285,7 +289,7 @@ static float BreezeFuzzyController_CalculateMembership(
  * @param input2 输入2的值
  * @return 控制器输出
  */
-static float BreezeFuzzyController_Compute(
+static inline float BreezeFuzzyController_Compute(
     BreezeFuzzyController* controller,
     float input1, float input2
 ) {
@@ -394,7 +398,7 @@ static float BreezeFuzzyController_Compute(
  *
  * @param controller 指向控制器结构体的指针
  */
-static void BreezeFuzzyController_Free(BreezeFuzzyController* controller) {
+static inline void BreezeFuzzyController_Free(BreezeFuzzyController* controller) {
     if (!controller) return;
     
     if (controller->output_discretization) {

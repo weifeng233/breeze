@@ -9,6 +9,7 @@
 #ifndef BREEZE_ADAPTIVE_CONTROLLER_H
 #define BREEZE_ADAPTIVE_CONTROLLER_H
 
+#include <math.h>  /* fabsf */
 #include "pid_controller.h"
 
 #ifdef __cplusplus
@@ -76,7 +77,7 @@ typedef struct {
  * @param u_max 最大控制输入
  * @param dt 时间步长（秒）
  */
-static void BreezeMRAC_Init(
+static inline void BreezeMRAC_Init(
     BreezeMRAC* controller,
     float a_m, float b_m,
     float gamma1, float gamma2,
@@ -113,7 +114,7 @@ static void BreezeMRAC_Init(
  * @param y 系统输出
  * @return 控制输入
  */
-static float BreezeMRAC_Update(BreezeMRAC* controller, float r, float y) {
+static inline float BreezeMRAC_Update(BreezeMRAC* controller, float r, float y) {
     float u;
     float error;
     
@@ -164,7 +165,7 @@ static float BreezeMRAC_Update(BreezeMRAC* controller, float r, float y) {
  * @param error_threshold 误差阈值
  * @param adaptation_period 自适应周期（控制步数）
  */
-static void BreezeAdaptivePID_Init(
+static inline void BreezeAdaptivePID_Init(
     BreezeAdaptivePID* controller,
     BreezePIDType type,
     float kp, float ki, float kd,
@@ -205,14 +206,13 @@ static void BreezeAdaptivePID_Init(
  * @param measurement 测量值
  * @return 控制输出
  */
-static float BreezeAdaptivePID_Compute(
+static inline float BreezeAdaptivePID_Compute(
     BreezeAdaptivePID* controller,
     float setpoint, float measurement
 ) {
     float output;
     float error;
     float error_change;
-    float output_change;
     
     if (!controller) return 0.0f;
     
@@ -225,9 +225,12 @@ static float BreezeAdaptivePID_Compute(
     /* 使用基础PID控制器计算输出 */
     output = BreezePIDController_Compute(&controller->pid, measurement);
     
-    /* 计算误差和输出的变化 */
+    /* 计算误差变化量 */
     error_change = error - controller->prev_error;
-    output_change = output - controller->prev_output;
+    /* 注意：这里原先还算了 output_change = output - prev_output，但它从未被读过。
+     * 下面的自适应规则只用 error / prev_error / error_change，输出变化量不参与。
+     * 已删除该局部变量；prev_output 字段仍然照旧保存，属对外可见状态。
+     * 详见 docs/REVIEW.md 里记录的这处"注释与代码不一致"。 */
     
     /* 自适应逻辑 */
     controller->adaptation_counter++;
@@ -241,7 +244,8 @@ static float BreezeAdaptivePID_Compute(
             float ki_delta = 0.0f;
             float kd_delta = 0.0f;
             
-            /* 基于误差和输出变化调整PID参数 */
+            /* 基于误差及其变化调整PID参数
+             * （原文写的是"基于误差和输出变化"，但代码从未读过输出变化量） */
             /* 比例项调整：误差大且同向时增加Kp，误差小或反向时减小Kp */
             if (error * controller->prev_error > 0.0f && fabsf(error) > fabsf(controller->prev_error)) {
                 kp_delta = controller->adaptation_rate * 0.1f;

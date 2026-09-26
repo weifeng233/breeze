@@ -64,7 +64,7 @@ typedef struct {
  * @param get_imu_data IMU数据函数
  * @param dt 控制循环时间步长（秒）
  */
-static void BreezeBalanceController_Init(
+static inline void BreezeBalanceController_Init(
     BreezeBalanceController* controller,
     BreezeBalanceControllerConfig config,
     BreezeMotorControlFunc set_motor,
@@ -109,7 +109,7 @@ static void BreezeBalanceController_Init(
  * @param ki 积分增益
  * @param kd 微分增益
  */
-static void BreezeBalanceController_SetAnglePIDParams(
+static inline void BreezeBalanceController_SetAnglePIDParams(
     BreezeBalanceController* controller,
     float kp, float ki, float kd
 ) {
@@ -128,7 +128,7 @@ static void BreezeBalanceController_SetAnglePIDParams(
  * @param ki 积分增益
  * @param kd 微分增益
  */
-static void BreezeBalanceController_SetSpeedPIDParams(
+static inline void BreezeBalanceController_SetSpeedPIDParams(
     BreezeBalanceController* controller,
     float kp, float ki, float kd
 ) {
@@ -147,7 +147,7 @@ static void BreezeBalanceController_SetSpeedPIDParams(
  * @param ki 积分增益
  * @param kd 微分增益
  */
-static void BreezeBalanceController_SetTurnPIDParams(
+static inline void BreezeBalanceController_SetTurnPIDParams(
     BreezeBalanceController* controller,
     float kp, float ki, float kd
 ) {
@@ -165,7 +165,7 @@ static void BreezeBalanceController_SetTurnPIDParams(
  * @param speed 目标前进速度（米/秒）
  * @param turn_rate 目标转向速率（弧度/秒，正值=逆时针）
  */
-static void BreezeBalanceController_SetTargets(
+static inline void BreezeBalanceController_SetTargets(
     BreezeBalanceController* controller,
     float speed, float turn_rate
 ) {
@@ -196,7 +196,7 @@ static void BreezeBalanceController_SetTargets(
  * @param encoder_counts 自上次更新以来的编码器计数
  * @return 轮速（米/秒）
  */
-static float BreezeBalanceController_EncoderToSpeed(
+static inline float BreezeBalanceController_EncoderToSpeed(
     BreezeBalanceController* controller,
     float encoder_counts
 ) {
@@ -223,7 +223,7 @@ static float BreezeBalanceController_EncoderToSpeed(
  * @param controller 指向控制器结构体的指针
  * @return 如果保持平衡返回1，如果倾斜角度超过安全限制返回0
  */
-static int BreezeBalanceController_Update(BreezeBalanceController* controller) {
+static inline int BreezeBalanceController_Update(BreezeBalanceController* controller) {
     BreezeIMUData imu_data;
     float left_encoder_counts, right_encoder_counts;
     float left_wheel_speed, right_wheel_speed;

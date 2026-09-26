@@ -56,7 +56,7 @@ typedef struct {
  * @param get_encoder 编码器读取函数
  * @param dt 控制循环时间步长（秒）
  */
-static void BreezeAckermannSteering_Init(
+static inline void BreezeAckermannSteering_Init(
     BreezeAckermannSteering* controller,
     BreezeAckermannConfig config,
     BreezeMotorControlFunc set_motor,
@@ -88,7 +88,7 @@ static void BreezeAckermannSteering_Init(
  * @param ki 积分增益
  * @param kd 微分增益
  */
-static void BreezeAckermannSteering_SetSpeedPIDParams(
+static inline void BreezeAckermannSteering_SetSpeedPIDParams(
     BreezeAckermannSteering* controller,
     float kp, float ki, float kd
 ) {
@@ -107,7 +107,7 @@ static void BreezeAckermannSteering_SetSpeedPIDParams(
  * @param ki 积分增益
  * @param kd 微分增益
  */
-static void BreezeAckermannSteering_SetSteeringPIDParams(
+static inline void BreezeAckermannSteering_SetSteeringPIDParams(
     BreezeAckermannSteering* controller,
     float kp, float ki, float kd
 ) {
@@ -125,7 +125,7 @@ static void BreezeAckermannSteering_SetSteeringPIDParams(
  * @param speed 目标前进速度（米/秒）
  * @param steering_angle 目标转向角度（弧度，正值=左转）
  */
-static void BreezeAckermannSteering_SetTargets(
+static inline void BreezeAckermannSteering_SetTargets(
     BreezeAckermannSteering* controller,
     float speed,
     float steering_angle
@@ -156,7 +156,7 @@ static void BreezeAckermannSteering_SetTargets(
  * @param encoder_counts 自上次更新以来的编码器计数
  * @return 轮速（米/秒）
  */
-static float BreezeAckermannSteering_EncoderToSpeed(
+static inline float BreezeAckermannSteering_EncoderToSpeed(
     BreezeAckermannSteering* controller,
     float encoder_counts
 ) {
@@ -181,7 +181,7 @@ static float BreezeAckermannSteering_EncoderToSpeed(
  * @param inner_angle 用于存储内轮角度的指针
  * @param outer_angle 用于存储外轮角度的指针
  */
-static void BreezeAckermannSteering_CalculateWheelAngles(
+static inline void BreezeAckermannSteering_CalculateWheelAngles(
     BreezeAckermannSteering* controller,
     float steering_angle,
     float* inner_angle,
@@ -234,7 +234,7 @@ static void BreezeAckermannSteering_CalculateWheelAngles(
  *
  * @param controller 指向控制器结构体的指针
  */
-static void BreezeAckermannSteering_Update(BreezeAckermannSteering* controller) {
+static inline void BreezeAckermannSteering_Update(BreezeAckermannSteering* controller) {
     float current_speed;
     float encoder_counts;
     float speed_output, steering_output;

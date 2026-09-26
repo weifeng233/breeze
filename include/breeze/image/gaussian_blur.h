@@ -24,7 +24,7 @@ extern "C" {
  * @param sigma 高斯函数的标准差
  * @return 返回1表示成功，0表示失败
  */
-static int BreezeGaussianKernel1D(
+static inline int BreezeGaussianKernel1D(
     float* kernel,
     int size,
     float sigma
@@ -65,7 +65,7 @@ static int BreezeGaussianKernel1D(
  * @param kernel_size 核的大小
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeGaussianBlur1D_Horizontal(
+static inline void BreezeGaussianBlur1D_Horizontal(
     const unsigned char* src,
     unsigned char* temp,
     int width, int height,
@@ -117,7 +117,7 @@ static void BreezeGaussianBlur1D_Horizontal(
  * @param kernel_size 核的大小
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeGaussianBlur1D_Vertical(
+static inline void BreezeGaussianBlur1D_Vertical(
     const unsigned char* temp,
     unsigned char* dst,
     int width, int height,
@@ -169,7 +169,7 @@ static void BreezeGaussianBlur1D_Vertical(
  * @param kernel_size 核的大小（如果为0，则自动计算）
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeGaussianBlur(
+static inline void BreezeGaussianBlur(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,

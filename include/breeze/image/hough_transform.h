@@ -48,7 +48,7 @@ typedef struct {
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  * @return 检测到的直线数量
  */
-static int BreezeHoughLines(
+static inline int BreezeHoughLines(
     const unsigned char* src,
     int width, int height,
     BreezeHoughLine* lines,
@@ -147,7 +147,7 @@ static int BreezeHoughLines(
  * @param color 线条颜色
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeDrawHoughLine(
+static inline void BreezeDrawHoughLine(
     unsigned char* dst,
     int width, int height,
     const BreezeHoughLine* line,
@@ -252,7 +252,7 @@ static void BreezeDrawHoughLine(
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  * @return 检测到的圆数量
  */
-static int BreezeHoughCircles(
+static inline int BreezeHoughCircles(
     const unsigned char* src,
     int width, int height,
     BreezeHoughCircle* circles,

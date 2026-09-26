@@ -37,7 +37,7 @@ typedef struct {
  * @param u_min 最小控制输入
  * @param u_max 最大控制输入
  */
-static void BreezeStateFeedbackController_Init(
+static inline void BreezeStateFeedbackController_Init(
     BreezeStateFeedbackController* controller,
     const float* K,
     int state_dim,
@@ -66,7 +66,7 @@ static void BreezeStateFeedbackController_Init(
  * @param controller 指向控制器结构体的指针
  * @param reference 参考输入值
  */
-static void BreezeStateFeedbackController_SetReference(
+static inline void BreezeStateFeedbackController_SetReference(
     BreezeStateFeedbackController* controller,
     float reference
 ) {
@@ -82,7 +82,7 @@ static void BreezeStateFeedbackController_SetReference(
  * @param state 系统状态向量
  * @return 控制输出
  */
-static float BreezeStateFeedbackController_Compute(
+static inline float BreezeStateFeedbackController_Compute(
     BreezeStateFeedbackController* controller,
     const float* state
 ) {
@@ -149,7 +149,7 @@ typedef struct {
  * @param max_iterations 最大迭代次数
  * @param convergence_tol 收敛容差
  */
-static void BreezeLQRController_Init(
+static inline void BreezeLQRController_Init(
     BreezeLQRController* controller,
     const float A[][4],
     const float* B,
@@ -198,7 +198,7 @@ static void BreezeLQRController_Init(
  * @param controller 指向控制器结构体的指针
  * @param K 状态反馈增益向量
  */
-static void BreezeLQRController_SetGains(
+static inline void BreezeLQRController_SetGains(
     BreezeLQRController* controller,
     const float* K
 ) {
@@ -217,7 +217,7 @@ static void BreezeLQRController_SetGains(
  * @param controller 指向控制器结构体的指针
  * @param reference 参考输入值
  */
-static void BreezeLQRController_SetReference(
+static inline void BreezeLQRController_SetReference(
     BreezeLQRController* controller,
     float reference
 ) {
@@ -233,7 +233,7 @@ static void BreezeLQRController_SetReference(
  * @param state 系统状态向量
  * @return 控制输出
  */
-static float BreezeLQRController_Compute(
+static inline float BreezeLQRController_Compute(
     BreezeLQRController* controller,
     const float* state
 ) {

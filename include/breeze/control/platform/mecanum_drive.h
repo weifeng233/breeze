@@ -9,6 +9,7 @@
 #ifndef BREEZE_MECANUM_DRIVE_H
 #define BREEZE_MECANUM_DRIVE_H
 
+#include <math.h>  /* fabsf, sqrtf */
 #include "../pid_controller.h"
 #include "mobile_platform_hal.h"
 
@@ -63,7 +64,7 @@ typedef struct {
  * @param get_encoder 编码器读取函数
  * @param dt 控制循环时间步长（秒）
  */
-static void BreezeMecanumDrive_Init(
+static inline void BreezeMecanumDrive_Init(
     BreezeMecanumDrive* controller,
     BreezeMecanumDriveConfig config,
     BreezeMotorControlFunc set_motor,
@@ -97,7 +98,7 @@ static void BreezeMecanumDrive_Init(
  * @param ki 积分增益
  * @param kd 微分增益
  */
-static void BreezeMecanumDrive_SetPIDParams(
+static inline void BreezeMecanumDrive_SetPIDParams(
     BreezeMecanumDrive* controller,
     float kp, float ki, float kd
 ) {
@@ -120,7 +121,7 @@ static void BreezeMecanumDrive_SetPIDParams(
  * @param vy 目标Y方向速度（米/秒，左侧为正）
  * @param omega 目标角速度（弧度/秒，逆时针为正）
  */
-static void BreezeMecanumDrive_SetVelocity(
+static inline void BreezeMecanumDrive_SetVelocity(
     BreezeMecanumDrive* controller,
     float vx, float vy, float omega
 ) {
@@ -153,7 +154,7 @@ static void BreezeMecanumDrive_SetVelocity(
  * @param encoder_counts 自上次更新以来的编码器计数
  * @return 轮速（米/秒）
  */
-static float BreezeMecanumDrive_EncoderToSpeed(
+static inline float BreezeMecanumDrive_EncoderToSpeed(
     BreezeMecanumDrive* controller,
     float encoder_counts
 ) {
@@ -179,7 +180,7 @@ static float BreezeMecanumDrive_EncoderToSpeed(
  *
  * @param controller 指向控制器结构体的指针
  */
-static void BreezeMecanumDrive_Update(BreezeMecanumDrive* controller) {
+static inline void BreezeMecanumDrive_Update(BreezeMecanumDrive* controller) {
     float wheel_target_speeds[4];
     float wheel_current_speeds[4];
     float wheel_outputs[4];

@@ -27,7 +27,7 @@ extern "C" {
  * @param height 图像高度
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeCannyGradient(
+static inline void BreezeCannyGradient(
     const unsigned char* src,
     float* magnitude,
     unsigned char* direction,
@@ -90,7 +90,7 @@ static void BreezeCannyGradient(
  * @param width 图像宽度
  * @param height 图像高度
  */
-static void BreezeCannyNonMaxSuppression(
+static inline void BreezeCannyNonMaxSuppression(
     const float* magnitude,
     const unsigned char* direction,
     float* result,
@@ -152,7 +152,7 @@ static void BreezeCannyNonMaxSuppression(
  * @param low_threshold 低阈值
  * @param high_threshold 高阈值
  */
-static void BreezeCannyHysteresis(
+static inline void BreezeCannyHysteresis(
     const float* nms,
     unsigned char* edges,
     int width, int height,
@@ -238,7 +238,7 @@ static void BreezeCannyHysteresis(
  * @param high_threshold 高阈值
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeCannyEdgeDetection(
+static inline void BreezeCannyEdgeDetection(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,

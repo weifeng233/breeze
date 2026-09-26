@@ -9,6 +9,8 @@
 #ifndef BREEZE_MEDIAN_FILTER_H
 #define BREEZE_MEDIAN_FILTER_H
 
+#include <stdlib.h>  /* malloc, free */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -32,7 +34,7 @@ typedef struct {
  * @param sorted 排序缓冲区（与buffer大小相同）
  * @param size 窗口大小
  */
-static void BreezeMedianFilter_Init(
+static inline void BreezeMedianFilter_Init(
     BreezeMedianFilter* filter,
     float* buffer,
     float* sorted,
@@ -61,7 +63,7 @@ static void BreezeMedianFilter_Init(
  * @param arr 要排序的数组
  * @param n 数组大小
  */
-static void BreezeMedianFilter_InsertionSort(float* arr, int n) {
+static inline void BreezeMedianFilter_InsertionSort(float* arr, int n) {
     int i, j;
     float key;
 
@@ -85,7 +87,7 @@ static void BreezeMedianFilter_InsertionSort(float* arr, int n) {
  * @param input 新的输入值
  * @return 中值滤波后的输出值
  */
-static float BreezeMedianFilter_Update(BreezeMedianFilter* filter, float input) {
+static inline float BreezeMedianFilter_Update(BreezeMedianFilter* filter, float input) {
     int i;
     float median;
 
@@ -127,7 +129,7 @@ static float BreezeMedianFilter_Update(BreezeMedianFilter* filter, float input) 
  *
  * @param filter 指向滤波器结构体的指针
  */
-static void BreezeMedianFilter_Reset(BreezeMedianFilter* filter) {
+static inline void BreezeMedianFilter_Reset(BreezeMedianFilter* filter) {
     int i;
 
     if (filter && filter->buffer && filter->size > 0) {
@@ -152,7 +154,7 @@ static void BreezeMedianFilter_Reset(BreezeMedianFilter* filter) {
  * @param kernel_size 滤波核大小（必须是奇数，如3、5、7等）
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeMedianFilterImage(
+static inline void BreezeMedianFilterImage(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,

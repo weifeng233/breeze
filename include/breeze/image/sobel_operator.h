@@ -9,6 +9,7 @@
 #define BREEZE_SOBEL_OPERATOR_H
 
 #include <math.h>
+#include <stdlib.h>  /* malloc, free */
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +24,7 @@ extern "C" {
  * @param height 图像高度
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeSobelOperator(
+static inline void BreezeSobelOperator(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,
@@ -90,7 +91,7 @@ static void BreezeSobelOperator(
  * @param height 图像高度
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeSobelOperatorWithDirection(
+static inline void BreezeSobelOperatorWithDirection(
     const unsigned char* src,
     unsigned char* magnitude,
     unsigned char* direction,
@@ -162,7 +163,7 @@ static void BreezeSobelOperatorWithDirection(
  * @param threshold 边缘检测的阈值
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeSobelOperatorThreshold(
+static inline void BreezeSobelOperatorThreshold(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,

@@ -23,7 +23,7 @@ extern "C" {
  * @param max_value 高于阈值的像素使用的最大值
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeBinaryThreshold(
+static inline void BreezeBinaryThreshold(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,
@@ -57,7 +57,7 @@ static void BreezeBinaryThreshold(
  * @param max_value 低于阈值的像素使用的最大值
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeInverseBinaryThreshold(
+static inline void BreezeInverseBinaryThreshold(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,

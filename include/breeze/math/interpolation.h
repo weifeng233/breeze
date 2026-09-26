@@ -10,6 +10,8 @@
 #define BREEZE_INTERPOLATION_H
 
 #include <math.h>
+#include <stddef.h>
+#include <stdlib.h>
 #include "vector.h"
 
 #ifdef __cplusplus
@@ -26,7 +28,7 @@ extern "C" {
  * @param x 插值点x坐标
  * @return 插值点y坐标
  */
-static float BreezeInterpolation_Linear(float x0, float y0, float x1, float y1, float x) {
+static inline float BreezeInterpolation_Linear(float x0, float y0, float x1, float y1, float x) {
     if (fabsf(x1 - x0) < 1e-6f) return (y0 + y1) * 0.5f;
     
     return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
@@ -40,7 +42,7 @@ static float BreezeInterpolation_Linear(float x0, float y0, float x1, float y1, 
  * @param mu 插值参数（0.0到1.0）
  * @return 插值点y坐标
  */
-static float BreezeInterpolation_Cosine(float y0, float y1, float mu) {
+static inline float BreezeInterpolation_Cosine(float y0, float y1, float mu) {
     float mu2;
     
     mu2 = (1.0f - cosf(mu * M_PI)) * 0.5f;
@@ -59,7 +61,7 @@ static float BreezeInterpolation_Cosine(float y0, float y1, float mu) {
  * @param bias 偏置参数（0.0为无偏置）
  * @return 插值点y坐标
  */
-static float BreezeInterpolation_CubicHermite(
+static inline float BreezeInterpolation_CubicHermite(
     float y0, float y1, float y2, float y3,
     float mu, float tension, float bias
 ) {
@@ -101,6 +103,13 @@ typedef struct {
     int allocated;     /* 是否分配了内存 */
 } BreezeSplineInterpolation;
 
+/*
+ * 前置声明：Init 在失败路径上要调用 Free，而 Free 的定义在本文件后面。
+ * 缺了它，C 会把 Init 里那次调用当成隐式声明（返回 int），随后 Free 的真
+ * 定义就变成 "static declaration follows non-static declaration" —— 硬错误。
+ */
+static inline void BreezeSplineInterpolation_Free(BreezeSplineInterpolation* spline);
+
 /**
  * @brief 初始化三次样条插值
  *
@@ -111,7 +120,7 @@ typedef struct {
  * @param allocate 是否分配内存（1表示分配，0表示使用传入的数组）
  * @return 成功返回1，失败返回0
  */
-static int BreezeSplineInterpolation_Init(
+static inline int BreezeSplineInterpolation_Init(
     BreezeSplineInterpolation* spline,
     float* x, float* y, int n,
     int allocate
@@ -238,7 +247,7 @@ static int BreezeSplineInterpolation_Init(
  *
  * @param spline 指向样条插值结构体的指针
  */
-static void BreezeSplineInterpolation_Free(BreezeSplineInterpolation* spline) {
+static inline void BreezeSplineInterpolation_Free(BreezeSplineInterpolation* spline) {
     if (!spline) return;
     
     if (spline->allocated) {
@@ -268,7 +277,7 @@ static void BreezeSplineInterpolation_Free(BreezeSplineInterpolation* spline) {
  * @param x 插值点x坐标
  * @return 插值点y坐标
  */
-static float BreezeSplineInterpolation_Evaluate(const BreezeSplineInterpolation* spline, float x) {
+static inline float BreezeSplineInterpolation_Evaluate(const BreezeSplineInterpolation* spline, float x) {
     int i;
     float dx;
     
@@ -307,7 +316,7 @@ typedef struct {
  * @param t 参数（0.0到1.0）
  * @param result 结果点
  */
-static void BreezeBezierCurve_Quadratic(
+static inline void BreezeBezierCurve_Quadratic(
     const BreezeBezierPoint* p0,
     const BreezeBezierPoint* p1,
     const BreezeBezierPoint* p2,
@@ -335,7 +344,7 @@ static void BreezeBezierCurve_Quadratic(
  * @param t 参数（0.0到1.0）
  * @param result 结果点
  */
-static void BreezeBezierCurve_Cubic(
+static inline void BreezeBezierCurve_Cubic(
     const BreezeBezierPoint* p0,
     const BreezeBezierPoint* p1,
     const BreezeBezierPoint* p2,

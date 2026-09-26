@@ -22,7 +22,7 @@ extern "C" {
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  * @return 最佳阈值（0-255）
  */
-static unsigned char BreezeOtsuThreshold(
+static inline unsigned char BreezeOtsuThreshold(
     const unsigned char* src,
     int width, int height,
     int stride_bytes
@@ -90,7 +90,7 @@ static unsigned char BreezeOtsuThreshold(
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  * @return 使用的阈值
  */
-static unsigned char BreezeApplyOtsuThreshold(
+static inline unsigned char BreezeApplyOtsuThreshold(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,

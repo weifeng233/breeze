@@ -29,7 +29,7 @@ typedef struct {
  * @param alpha 滤波系数（0.0到1.0）- 值越小滤波效果越强，但响应越慢
  * @param initial_value 初始输出值
  */
-static void BreezeLowPassFilter_Init(
+static inline void BreezeLowPassFilter_Init(
     BreezeLowPassFilter* filter,
     float alpha,
     float initial_value
@@ -53,7 +53,7 @@ static void BreezeLowPassFilter_Init(
  * @param sample_time 采样时间（秒）
  * @param initial_value 初始输出值
  */
-static void BreezeLowPassFilter_InitWithTimeConstant(
+static inline void BreezeLowPassFilter_InitWithTimeConstant(
     BreezeLowPassFilter* filter,
     float time_constant,
     float sample_time,
@@ -81,7 +81,7 @@ static void BreezeLowPassFilter_InitWithTimeConstant(
  * @param filter 指向滤波器结构体的指针
  * @param alpha 滤波系数（0.0到1.0）
  */
-static void BreezeLowPassFilter_SetAlpha(BreezeLowPassFilter* filter, float alpha) {
+static inline void BreezeLowPassFilter_SetAlpha(BreezeLowPassFilter* filter, float alpha) {
     if (filter) {
         /* 将alpha限制在0和1之间 */
         if (alpha < 0.0f) alpha = 0.0f;
@@ -98,7 +98,7 @@ static void BreezeLowPassFilter_SetAlpha(BreezeLowPassFilter* filter, float alph
  * @param time_constant 时间常数（秒）
  * @param sample_time 采样时间（秒）
  */
-static void BreezeLowPassFilter_SetTimeConstant(
+static inline void BreezeLowPassFilter_SetTimeConstant(
     BreezeLowPassFilter* filter,
     float time_constant,
     float sample_time
@@ -124,7 +124,7 @@ static void BreezeLowPassFilter_SetTimeConstant(
  * @param input 新的输入值
  * @return 滤波后的输出值
  */
-static float BreezeLowPassFilter_Update(BreezeLowPassFilter* filter, float input) {
+static inline float BreezeLowPassFilter_Update(BreezeLowPassFilter* filter, float input) {
     float output;
 
     if (!filter) return input;
@@ -148,7 +148,7 @@ static float BreezeLowPassFilter_Update(BreezeLowPassFilter* filter, float input
  * @param filter 指向滤波器结构体的指针
  * @param value 重置值
  */
-static void BreezeLowPassFilter_Reset(BreezeLowPassFilter* filter, float value) {
+static inline void BreezeLowPassFilter_Reset(BreezeLowPassFilter* filter, float value) {
     if (filter) {
         filter->prev_output = value;
         filter->initialized = 1;
@@ -171,7 +171,7 @@ typedef struct {
  * @param alpha 平滑系数（0.0到1.0）- 值越小平滑效果越强
  * @param initial_value 初始平均值
  */
-static void BreezeEWMAFilter_Init(
+static inline void BreezeEWMAFilter_Init(
     BreezeEWMAFilter* filter,
     float alpha,
     float initial_value
@@ -194,7 +194,7 @@ static void BreezeEWMAFilter_Init(
  * @param input 新的输入值
  * @return 滤波后的平均值
  */
-static float BreezeEWMAFilter_Update(BreezeEWMAFilter* filter, float input) {
+static inline float BreezeEWMAFilter_Update(BreezeEWMAFilter* filter, float input) {
     if (!filter) return input;
 
     if (!filter->initialized) {
@@ -215,7 +215,7 @@ static float BreezeEWMAFilter_Update(BreezeEWMAFilter* filter, float input) {
  * @param filter 指向滤波器结构体的指针
  * @param value 重置值
  */
-static void BreezeEWMAFilter_Reset(BreezeEWMAFilter* filter, float value) {
+static inline void BreezeEWMAFilter_Reset(BreezeEWMAFilter* filter, float value) {
     if (filter) {
         filter->avg = value;
         filter->initialized = 1;

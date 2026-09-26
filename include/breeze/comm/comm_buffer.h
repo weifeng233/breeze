@@ -10,6 +10,7 @@
 #define BREEZE_COMM_BUFFER_H
 
 #include "../core/error_codes.h"
+#include "comm_interface.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -17,17 +18,14 @@
 extern "C" {
 #endif
 
-/**
- * @brief Communication buffer structure (forward declaration from comm_interface.h)
+/*
+ * BreezeCommBuffer 由 comm_interface.h 定义，这里只使用它。
+ *
+ * 这里原本又写了一份字段完全相同的 typedef。两个匿名结构体在 C 里是
+ * **不同的类型**，所以只要同时包含本文件与 comm_interface.h（uart.h 与
+ * breeze.h 都如此），编译器就报 conflicting types。唯一的定义点在
+ * comm_interface.h —— 缓冲区结构在那里是通信接口的一部分。
  */
-typedef struct {
-    uint8_t* data;          /**< Buffer data pointer */
-    size_t size;            /**< Buffer size */
-    size_t used;            /**< Used bytes in buffer */
-    size_t read_pos;        /**< Current read position */
-    size_t write_pos;       /**< Current write position */
-    int is_circular;        /**< Circular buffer flag */
-} BreezeCommBuffer;
 
 /**
  * @brief Buffer management utilities

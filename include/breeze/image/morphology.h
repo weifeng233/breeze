@@ -9,6 +9,7 @@
 #ifndef BREEZE_MORPHOLOGY_H
 #define BREEZE_MORPHOLOGY_H
 
+#include <math.h>  /* sqrtf */
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,7 +24,7 @@ extern "C" {
  * @param size 结构元素大小（必须是奇数）
  * @param shape 结构元素形状（0=矩形，1=十字形，2=圆形）
  */
-static void BreezeMorphologyCreateKernel(
+static inline void BreezeMorphologyCreateKernel(
     unsigned char* kernel,
     int size,
     int shape
@@ -90,7 +91,7 @@ static void BreezeMorphologyCreateKernel(
  * @param kernel_size 结构元素大小（必须是奇数）
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeMorphologyDilate(
+static inline void BreezeMorphologyDilate(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,
@@ -148,7 +149,7 @@ static void BreezeMorphologyDilate(
  * @param kernel_size 结构元素大小（必须是奇数）
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeMorphologyErode(
+static inline void BreezeMorphologyErode(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,
@@ -211,7 +212,7 @@ static void BreezeMorphologyErode(
  * @param kernel_size 结构元素大小（必须是奇数）
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeMorphologyOpen(
+static inline void BreezeMorphologyOpen(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,
@@ -250,7 +251,7 @@ static void BreezeMorphologyOpen(
  * @param kernel_size 结构元素大小（必须是奇数）
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeMorphologyClose(
+static inline void BreezeMorphologyClose(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,
@@ -289,7 +290,7 @@ static void BreezeMorphologyClose(
  * @param kernel_size 结构元素大小（必须是奇数）
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeMorphologyGradient(
+static inline void BreezeMorphologyGradient(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,

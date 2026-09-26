@@ -29,7 +29,7 @@ typedef struct {
  * @param filter 指向滤波器结构体的指针
  * @param alpha 滤波系数（0.0到1.0）- 值越大滤波效果越强，但响应越慢
  */
-static void BreezeHighPassFilter_Init(BreezeHighPassFilter* filter, float alpha) {
+static inline void BreezeHighPassFilter_Init(BreezeHighPassFilter* filter, float alpha) {
     if (filter) {
         /* 将alpha限制在0和1之间 */
         if (alpha < 0.0f) alpha = 0.0f;
@@ -49,7 +49,7 @@ static void BreezeHighPassFilter_Init(BreezeHighPassFilter* filter, float alpha)
  * @param time_constant 时间常数（秒）
  * @param sample_time 采样时间（秒）
  */
-static void BreezeHighPassFilter_InitWithTimeConstant(
+static inline void BreezeHighPassFilter_InitWithTimeConstant(
     BreezeHighPassFilter* filter,
     float time_constant,
     float sample_time
@@ -77,7 +77,7 @@ static void BreezeHighPassFilter_InitWithTimeConstant(
  * @param filter 指向滤波器结构体的指针
  * @param alpha 滤波系数（0.0到1.0）
  */
-static void BreezeHighPassFilter_SetAlpha(BreezeHighPassFilter* filter, float alpha) {
+static inline void BreezeHighPassFilter_SetAlpha(BreezeHighPassFilter* filter, float alpha) {
     if (filter) {
         /* 将alpha限制在0和1之间 */
         if (alpha < 0.0f) alpha = 0.0f;
@@ -94,7 +94,7 @@ static void BreezeHighPassFilter_SetAlpha(BreezeHighPassFilter* filter, float al
  * @param time_constant 时间常数（秒）
  * @param sample_time 采样时间（秒）
  */
-static void BreezeHighPassFilter_SetTimeConstant(
+static inline void BreezeHighPassFilter_SetTimeConstant(
     BreezeHighPassFilter* filter,
     float time_constant,
     float sample_time
@@ -120,7 +120,7 @@ static void BreezeHighPassFilter_SetTimeConstant(
  * @param input 新的输入值
  * @return 滤波后的输出值
  */
-static float BreezeHighPassFilter_Update(BreezeHighPassFilter* filter, float input) {
+static inline float BreezeHighPassFilter_Update(BreezeHighPassFilter* filter, float input) {
     float output;
 
     if (!filter) return 0.0f;
@@ -148,7 +148,7 @@ static float BreezeHighPassFilter_Update(BreezeHighPassFilter* filter, float inp
  * @param filter 指向滤波器结构体的指针
  * @param input_value 输入值重置
  */
-static void BreezeHighPassFilter_Reset(BreezeHighPassFilter* filter, float input_value) {
+static inline void BreezeHighPassFilter_Reset(BreezeHighPassFilter* filter, float input_value) {
     if (filter) {
         filter->prev_input = input_value;
         filter->prev_output = 0.0f;
@@ -171,7 +171,7 @@ typedef struct {
  * @param filter 指向滤波器结构体的指针
  * @param alpha 滤波系数（0.0到1.0）- 值越小滤波效果越强，但响应越慢
  */
-static void BreezeDCBlocker_Init(BreezeDCBlocker* filter, float alpha) {
+static inline void BreezeDCBlocker_Init(BreezeDCBlocker* filter, float alpha) {
     if (filter) {
         /* 将alpha限制在0和1之间 */
         if (alpha < 0.0f) alpha = 0.0f;
@@ -190,7 +190,7 @@ static void BreezeDCBlocker_Init(BreezeDCBlocker* filter, float alpha) {
  * @param input 新的输入值
  * @return 去除直流分量后的输出值
  */
-static float BreezeDCBlocker_Update(BreezeDCBlocker* filter, float input) {
+static inline float BreezeDCBlocker_Update(BreezeDCBlocker* filter, float input) {
     if (!filter) return input;
 
     if (!filter->initialized) {
@@ -212,7 +212,7 @@ static float BreezeDCBlocker_Update(BreezeDCBlocker* filter, float input) {
  * @param filter 指向滤波器结构体的指针
  * @param value 重置值
  */
-static void BreezeDCBlocker_Reset(BreezeDCBlocker* filter, float value) {
+static inline void BreezeDCBlocker_Reset(BreezeDCBlocker* filter, float value) {
     if (filter) {
         filter->avg = value;
         filter->initialized = 1;

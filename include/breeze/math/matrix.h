@@ -31,7 +31,7 @@ typedef struct {
  * @param rows 行数（最多4）
  * @param cols 列数（最多4）
  */
-static void BreezeMatrix_Init(BreezeMatrix* matrix, int rows, int cols) {
+static inline void BreezeMatrix_Init(BreezeMatrix* matrix, int rows, int cols) {
     int i, j;
     
     if (!matrix || rows <= 0 || cols <= 0 || rows > 4 || cols > 4) return;
@@ -52,7 +52,7 @@ static void BreezeMatrix_Init(BreezeMatrix* matrix, int rows, int cols) {
  *
  * @param matrix 指向矩阵结构体的指针
  */
-static void BreezeMatrix_SetIdentity(BreezeMatrix* matrix) {
+static inline void BreezeMatrix_SetIdentity(BreezeMatrix* matrix) {
     int i, j;
     int min_dim;
     
@@ -75,7 +75,7 @@ static void BreezeMatrix_SetIdentity(BreezeMatrix* matrix) {
  * @param col 列索引（从0开始）
  * @param value 元素值
  */
-static void BreezeMatrix_SetElement(BreezeMatrix* matrix, int row, int col, float value) {
+static inline void BreezeMatrix_SetElement(BreezeMatrix* matrix, int row, int col, float value) {
     if (!matrix || row < 0 || col < 0 || row >= matrix->rows || col >= matrix->cols) return;
     
     matrix->data[row][col] = value;
@@ -89,7 +89,7 @@ static void BreezeMatrix_SetElement(BreezeMatrix* matrix, int row, int col, floa
  * @param col 列索引（从0开始）
  * @return 元素值，如果索引无效则返回0
  */
-static float BreezeMatrix_GetElement(const BreezeMatrix* matrix, int row, int col) {
+static inline float BreezeMatrix_GetElement(const BreezeMatrix* matrix, int row, int col) {
     if (!matrix || row < 0 || col < 0 || row >= matrix->rows || col >= matrix->cols) return 0.0f;
     
     return matrix->data[row][col];
@@ -103,7 +103,7 @@ static float BreezeMatrix_GetElement(const BreezeMatrix* matrix, int row, int co
  * @param b 输入矩阵B
  * @return 成功返回1，失败返回0
  */
-static int BreezeMatrix_Add(BreezeMatrix* result, const BreezeMatrix* a, const BreezeMatrix* b) {
+static inline int BreezeMatrix_Add(BreezeMatrix* result, const BreezeMatrix* a, const BreezeMatrix* b) {
     int i, j;
     
     if (!result || !a || !b) return 0;
@@ -129,7 +129,7 @@ static int BreezeMatrix_Add(BreezeMatrix* result, const BreezeMatrix* a, const B
  * @param b 输入矩阵B
  * @return 成功返回1，失败返回0
  */
-static int BreezeMatrix_Subtract(BreezeMatrix* result, const BreezeMatrix* a, const BreezeMatrix* b) {
+static inline int BreezeMatrix_Subtract(BreezeMatrix* result, const BreezeMatrix* a, const BreezeMatrix* b) {
     int i, j;
     
     if (!result || !a || !b) return 0;
@@ -155,7 +155,7 @@ static int BreezeMatrix_Subtract(BreezeMatrix* result, const BreezeMatrix* a, co
  * @param b 输入矩阵B
  * @return 成功返回1，失败返回0
  */
-static int BreezeMatrix_Multiply(BreezeMatrix* result, const BreezeMatrix* a, const BreezeMatrix* b) {
+static inline int BreezeMatrix_Multiply(BreezeMatrix* result, const BreezeMatrix* a, const BreezeMatrix* b) {
     int i, j, k;
     BreezeMatrix temp;
     
@@ -194,7 +194,7 @@ static int BreezeMatrix_Multiply(BreezeMatrix* result, const BreezeMatrix* a, co
  * @param a 输入矩阵
  * @param scalar 标量值
  */
-static void BreezeMatrix_ScalarMultiply(BreezeMatrix* result, const BreezeMatrix* a, float scalar) {
+static inline void BreezeMatrix_ScalarMultiply(BreezeMatrix* result, const BreezeMatrix* a, float scalar) {
     int i, j;
     
     if (!result || !a) return;
@@ -215,7 +215,7 @@ static void BreezeMatrix_ScalarMultiply(BreezeMatrix* result, const BreezeMatrix
  * @param result 结果矩阵
  * @param a 输入矩阵
  */
-static void BreezeMatrix_Transpose(BreezeMatrix* result, const BreezeMatrix* a) {
+static inline void BreezeMatrix_Transpose(BreezeMatrix* result, const BreezeMatrix* a) {
     int i, j;
     BreezeMatrix temp;
     
@@ -247,7 +247,7 @@ static void BreezeMatrix_Transpose(BreezeMatrix* result, const BreezeMatrix* a) 
  * @param a 输入矩阵
  * @return 行列式值
  */
-static float BreezeMatrix_Determinant2x2(const BreezeMatrix* a) {
+static inline float BreezeMatrix_Determinant2x2(const BreezeMatrix* a) {
     if (!a || a->rows != 2 || a->cols != 2) return 0.0f;
     
     return a->data[0][0] * a->data[1][1] - a->data[0][1] * a->data[1][0];
@@ -259,7 +259,7 @@ static float BreezeMatrix_Determinant2x2(const BreezeMatrix* a) {
  * @param a 输入矩阵
  * @return 行列式值
  */
-static float BreezeMatrix_Determinant3x3(const BreezeMatrix* a) {
+static inline float BreezeMatrix_Determinant3x3(const BreezeMatrix* a) {
     float det;
     
     if (!a || a->rows != 3 || a->cols != 3) return 0.0f;
@@ -277,7 +277,7 @@ static float BreezeMatrix_Determinant3x3(const BreezeMatrix* a) {
  * @param a 输入矩阵
  * @return 行列式值，如果矩阵不是方阵或不支持的大小则返回0
  */
-static float BreezeMatrix_Determinant(const BreezeMatrix* a) {
+static inline float BreezeMatrix_Determinant(const BreezeMatrix* a) {
     if (!a || a->rows != a->cols) return 0.0f;
     
     if (a->rows == 2) {
@@ -297,7 +297,7 @@ static float BreezeMatrix_Determinant(const BreezeMatrix* a) {
  * @param a 输入矩阵
  * @return 成功返回1，失败返回0
  */
-static int BreezeMatrix_Inverse2x2(BreezeMatrix* result, const BreezeMatrix* a) {
+static inline int BreezeMatrix_Inverse2x2(BreezeMatrix* result, const BreezeMatrix* a) {
     float det;
     
     if (!result || !a || a->rows != 2 || a->cols != 2) return 0;
@@ -324,7 +324,7 @@ static int BreezeMatrix_Inverse2x2(BreezeMatrix* result, const BreezeMatrix* a) 
  * @param a 输入矩阵
  * @return 成功返回1，失败返回0
  */
-static int BreezeMatrix_Inverse3x3(BreezeMatrix* result, const BreezeMatrix* a) {
+static inline int BreezeMatrix_Inverse3x3(BreezeMatrix* result, const BreezeMatrix* a) {
     float det;
     
     if (!result || !a || a->rows != 3 || a->cols != 3) return 0;
@@ -359,7 +359,7 @@ static int BreezeMatrix_Inverse3x3(BreezeMatrix* result, const BreezeMatrix* a) 
  * @param a 输入矩阵
  * @return 成功返回1，失败返回0
  */
-static int BreezeMatrix_Inverse(BreezeMatrix* result, const BreezeMatrix* a) {
+static inline int BreezeMatrix_Inverse(BreezeMatrix* result, const BreezeMatrix* a) {
     if (!result || !a || a->rows != a->cols) return 0;
     
     if (a->rows == 2) {

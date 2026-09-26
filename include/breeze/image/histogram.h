@@ -25,7 +25,7 @@ extern "C" {
  * @param histogram 输出直方图（256个元素的数组）
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeHistogramCompute(
+static inline void BreezeHistogramCompute(
     const unsigned char* src,
     int width, int height,
     int* histogram,
@@ -55,7 +55,7 @@ static void BreezeHistogramCompute(
  * @param histogram 输入直方图（256个元素的数组）
  * @param cumulative_histogram 输出累积直方图（256个元素的数组）
  */
-static void BreezeHistogramCumulative(
+static inline void BreezeHistogramCumulative(
     const int* histogram,
     int* cumulative_histogram
 ) {
@@ -79,7 +79,7 @@ static void BreezeHistogramCumulative(
  * @param height 图像高度
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeHistogramEqualization(
+static inline void BreezeHistogramEqualization(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,
@@ -128,7 +128,7 @@ static void BreezeHistogramEqualization(
  * @param clip_limit 对比度限制（0表示无限制）
  * @param stride_bytes 每行的字节数（如果为0，则使用宽度）
  */
-static void BreezeHistogramEqualizationCLAHE(
+static inline void BreezeHistogramEqualizationCLAHE(
     const unsigned char* src,
     unsigned char* dst,
     int width, int height,

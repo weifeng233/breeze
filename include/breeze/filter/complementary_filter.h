@@ -32,7 +32,7 @@ typedef struct {
  * @param alpha 滤波系数（0.0到1.0）- 值越高越信任陀螺仪数据
  * @param dt 时间步长（秒）
  */
-static void BreezeComplementaryFilter_Init(BreezeComplementaryFilter* filter, float alpha, float dt) {
+static inline void BreezeComplementaryFilter_Init(BreezeComplementaryFilter* filter, float alpha, float dt) {
     if (filter) {
         filter->roll = 0.0f;
         filter->pitch = 0.0f;
@@ -47,12 +47,14 @@ static void BreezeComplementaryFilter_Init(BreezeComplementaryFilter* filter, fl
  * @param filter 指向滤波器结构体的指针
  * @param gyro_x 陀螺仪X轴角速度（弧度/秒）
  * @param gyro_y 陀螺仪Y轴角速度（弧度/秒）
- * @param gyro_z 陀螺仪Z轴角速度（弧度/秒）
+ * @param gyro_z 陀螺仪Z轴角速度（弧度/秒）。本滤波器只估计横滚与俯仰
+ *               （结构体里没有 yaw 字段），因此该参数不参与运算，
+ *               保留它只是为了与三轴传感器的调用形式对称。
  * @param accel_x 加速度计X轴读数
  * @param accel_y 加速度计Y轴读数
  * @param accel_z 加速度计Z轴读数
  */
-static void BreezeComplementaryFilter_Update(
+static inline void BreezeComplementaryFilter_Update(
     BreezeComplementaryFilter* filter,
     float gyro_x, float gyro_y, float gyro_z,
     float accel_x, float accel_y, float accel_z
@@ -61,6 +63,8 @@ static void BreezeComplementaryFilter_Update(
     float gyro_roll, gyro_pitch;
 
     if (!filter) return;
+
+    (void)gyro_z;   /* 见参数说明：偏航不由互补滤波器估计 */
 
     /* 根据加速度计（重力向量）计算横滚角和俯仰角 */
     accel_roll = atan2f(accel_y, accel_z);
@@ -81,7 +85,7 @@ static void BreezeComplementaryFilter_Update(
  * @param filter 指向滤波器结构体的指针
  * @return 横滚角（弧度）
  */
-static float BreezeComplementaryFilter_GetRoll(const BreezeComplementaryFilter* filter) {
+static inline float BreezeComplementaryFilter_GetRoll(const BreezeComplementaryFilter* filter) {
     return filter ? filter->roll : 0.0f;
 }
 
@@ -91,7 +95,7 @@ static float BreezeComplementaryFilter_GetRoll(const BreezeComplementaryFilter* 
  * @param filter 指向滤波器结构体的指针
  * @return 俯仰角（弧度）
  */
-static float BreezeComplementaryFilter_GetPitch(const BreezeComplementaryFilter* filter) {
+static inline float BreezeComplementaryFilter_GetPitch(const BreezeComplementaryFilter* filter) {
     return filter ? filter->pitch : 0.0f;
 }
 

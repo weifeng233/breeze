@@ -49,7 +49,7 @@ typedef struct {
  * @param x X分量
  * @param y Y分量
  */
-static void BreezeVector2D_Init(BreezeVector2D* vector, float x, float y) {
+static inline void BreezeVector2D_Init(BreezeVector2D* vector, float x, float y) {
     if (!vector) return;
     
     vector->x = x;
@@ -64,7 +64,7 @@ static void BreezeVector2D_Init(BreezeVector2D* vector, float x, float y) {
  * @param y Y分量
  * @param z Z分量
  */
-static void BreezeVector3D_Init(BreezeVector3D* vector, float x, float y, float z) {
+static inline void BreezeVector3D_Init(BreezeVector3D* vector, float x, float y, float z) {
     if (!vector) return;
     
     vector->x = x;
@@ -81,7 +81,7 @@ static void BreezeVector3D_Init(BreezeVector3D* vector, float x, float y, float 
  * @param z Z分量
  * @param w W分量
  */
-static void BreezeVector4D_Init(BreezeVector4D* vector, float x, float y, float z, float w) {
+static inline void BreezeVector4D_Init(BreezeVector4D* vector, float x, float y, float z, float w) {
     if (!vector) return;
     
     vector->x = x;
@@ -97,7 +97,7 @@ static void BreezeVector4D_Init(BreezeVector4D* vector, float x, float y, float 
  * @param a 输入向量A
  * @param b 输入向量B
  */
-static void BreezeVector2D_Add(BreezeVector2D* result, const BreezeVector2D* a, const BreezeVector2D* b) {
+static inline void BreezeVector2D_Add(BreezeVector2D* result, const BreezeVector2D* a, const BreezeVector2D* b) {
     if (!result || !a || !b) return;
     
     result->x = a->x + b->x;
@@ -111,7 +111,7 @@ static void BreezeVector2D_Add(BreezeVector2D* result, const BreezeVector2D* a, 
  * @param a 输入向量A
  * @param b 输入向量B
  */
-static void BreezeVector3D_Add(BreezeVector3D* result, const BreezeVector3D* a, const BreezeVector3D* b) {
+static inline void BreezeVector3D_Add(BreezeVector3D* result, const BreezeVector3D* a, const BreezeVector3D* b) {
     if (!result || !a || !b) return;
     
     result->x = a->x + b->x;
@@ -126,7 +126,7 @@ static void BreezeVector3D_Add(BreezeVector3D* result, const BreezeVector3D* a, 
  * @param a 输入向量A
  * @param b 输入向量B
  */
-static void BreezeVector4D_Add(BreezeVector4D* result, const BreezeVector4D* a, const BreezeVector4D* b) {
+static inline void BreezeVector4D_Add(BreezeVector4D* result, const BreezeVector4D* a, const BreezeVector4D* b) {
     if (!result || !a || !b) return;
     
     result->x = a->x + b->x;
@@ -142,7 +142,7 @@ static void BreezeVector4D_Add(BreezeVector4D* result, const BreezeVector4D* a, 
  * @param a 输入向量A
  * @param b 输入向量B
  */
-static void BreezeVector2D_Subtract(BreezeVector2D* result, const BreezeVector2D* a, const BreezeVector2D* b) {
+static inline void BreezeVector2D_Subtract(BreezeVector2D* result, const BreezeVector2D* a, const BreezeVector2D* b) {
     if (!result || !a || !b) return;
     
     result->x = a->x - b->x;
@@ -156,7 +156,7 @@ static void BreezeVector2D_Subtract(BreezeVector2D* result, const BreezeVector2D
  * @param a 输入向量A
  * @param b 输入向量B
  */
-static void BreezeVector3D_Subtract(BreezeVector3D* result, const BreezeVector3D* a, const BreezeVector3D* b) {
+static inline void BreezeVector3D_Subtract(BreezeVector3D* result, const BreezeVector3D* a, const BreezeVector3D* b) {
     if (!result || !a || !b) return;
     
     result->x = a->x - b->x;
@@ -171,7 +171,7 @@ static void BreezeVector3D_Subtract(BreezeVector3D* result, const BreezeVector3D
  * @param a 输入向量A
  * @param b 输入向量B
  */
-static void BreezeVector4D_Subtract(BreezeVector4D* result, const BreezeVector4D* a, const BreezeVector4D* b) {
+static inline void BreezeVector4D_Subtract(BreezeVector4D* result, const BreezeVector4D* a, const BreezeVector4D* b) {
     if (!result || !a || !b) return;
     
     result->x = a->x - b->x;
@@ -187,7 +187,7 @@ static void BreezeVector4D_Subtract(BreezeVector4D* result, const BreezeVector4D
  * @param vector 输入向量
  * @param scalar 标量值
  */
-static void BreezeVector2D_ScalarMultiply(BreezeVector2D* result, const BreezeVector2D* vector, float scalar) {
+static inline void BreezeVector2D_ScalarMultiply(BreezeVector2D* result, const BreezeVector2D* vector, float scalar) {
     if (!result || !vector) return;
     
     result->x = vector->x * scalar;
@@ -201,7 +201,7 @@ static void BreezeVector2D_ScalarMultiply(BreezeVector2D* result, const BreezeVe
  * @param vector 输入向量
  * @param scalar 标量值
  */
-static void BreezeVector3D_ScalarMultiply(BreezeVector3D* result, const BreezeVector3D* vector, float scalar) {
+static inline void BreezeVector3D_ScalarMultiply(BreezeVector3D* result, const BreezeVector3D* vector, float scalar) {
     if (!result || !vector) return;
     
     result->x = vector->x * scalar;
@@ -216,7 +216,7 @@ static void BreezeVector3D_ScalarMultiply(BreezeVector3D* result, const BreezeVe
  * @param vector 输入向量
  * @param scalar 标量值
  */
-static void BreezeVector4D_ScalarMultiply(BreezeVector4D* result, const BreezeVector4D* vector, float scalar) {
+static inline void BreezeVector4D_ScalarMultiply(BreezeVector4D* result, const BreezeVector4D* vector, float scalar) {
     if (!result || !vector) return;
     
     result->x = vector->x * scalar;
@@ -232,7 +232,7 @@ static void BreezeVector4D_ScalarMultiply(BreezeVector4D* result, const BreezeVe
  * @param b 输入向量B
  * @return 点积结果
  */
-static float BreezeVector2D_DotProduct(const BreezeVector2D* a, const BreezeVector2D* b) {
+static inline float BreezeVector2D_DotProduct(const BreezeVector2D* a, const BreezeVector2D* b) {
     if (!a || !b) return 0.0f;
     
     return a->x * b->x + a->y * b->y;
@@ -245,7 +245,7 @@ static float BreezeVector2D_DotProduct(const BreezeVector2D* a, const BreezeVect
  * @param b 输入向量B
  * @return 点积结果
  */
-static float BreezeVector3D_DotProduct(const BreezeVector3D* a, const BreezeVector3D* b) {
+static inline float BreezeVector3D_DotProduct(const BreezeVector3D* a, const BreezeVector3D* b) {
     if (!a || !b) return 0.0f;
     
     return a->x * b->x + a->y * b->y + a->z * b->z;
@@ -258,7 +258,7 @@ static float BreezeVector3D_DotProduct(const BreezeVector3D* a, const BreezeVect
  * @param b 输入向量B
  * @return 点积结果
  */
-static float BreezeVector4D_DotProduct(const BreezeVector4D* a, const BreezeVector4D* b) {
+static inline float BreezeVector4D_DotProduct(const BreezeVector4D* a, const BreezeVector4D* b) {
     if (!a || !b) return 0.0f;
     
     return a->x * b->x + a->y * b->y + a->z * b->z + a->w * b->w;
@@ -271,7 +271,7 @@ static float BreezeVector4D_DotProduct(const BreezeVector4D* a, const BreezeVect
  * @param a 输入向量A
  * @param b 输入向量B
  */
-static void BreezeVector3D_CrossProduct(BreezeVector3D* result, const BreezeVector3D* a, const BreezeVector3D* b) {
+static inline void BreezeVector3D_CrossProduct(BreezeVector3D* result, const BreezeVector3D* a, const BreezeVector3D* b) {
     BreezeVector3D temp;
     
     if (!result || !a || !b) return;
@@ -292,7 +292,7 @@ static void BreezeVector3D_CrossProduct(BreezeVector3D* result, const BreezeVect
  * @param vector 输入向量
  * @return 向量长度
  */
-static float BreezeVector2D_Length(const BreezeVector2D* vector) {
+static inline float BreezeVector2D_Length(const BreezeVector2D* vector) {
     if (!vector) return 0.0f;
     
     return sqrtf(vector->x * vector->x + vector->y * vector->y);
@@ -304,7 +304,7 @@ static float BreezeVector2D_Length(const BreezeVector2D* vector) {
  * @param vector 输入向量
  * @return 向量长度
  */
-static float BreezeVector3D_Length(const BreezeVector3D* vector) {
+static inline float BreezeVector3D_Length(const BreezeVector3D* vector) {
     if (!vector) return 0.0f;
     
     return sqrtf(vector->x * vector->x + vector->y * vector->y + vector->z * vector->z);
@@ -316,7 +316,7 @@ static float BreezeVector3D_Length(const BreezeVector3D* vector) {
  * @param vector 输入向量
  * @return 向量长度
  */
-static float BreezeVector4D_Length(const BreezeVector4D* vector) {
+static inline float BreezeVector4D_Length(const BreezeVector4D* vector) {
     if (!vector) return 0.0f;
     
     return sqrtf(vector->x * vector->x + vector->y * vector->y + 
@@ -330,7 +330,7 @@ static float BreezeVector4D_Length(const BreezeVector4D* vector) {
  * @param vector 输入向量
  * @return 成功返回1，失败返回0
  */
-static int BreezeVector2D_Normalize(BreezeVector2D* result, const BreezeVector2D* vector) {
+static inline int BreezeVector2D_Normalize(BreezeVector2D* result, const BreezeVector2D* vector) {
     float length;
     
     if (!result || !vector) return 0;
@@ -352,7 +352,7 @@ static int BreezeVector2D_Normalize(BreezeVector2D* result, const BreezeVector2D
  * @param vector 输入向量
  * @return 成功返回1，失败返回0
  */
-static int BreezeVector3D_Normalize(BreezeVector3D* result, const BreezeVector3D* vector) {
+static inline int BreezeVector3D_Normalize(BreezeVector3D* result, const BreezeVector3D* vector) {
     float length;
     
     if (!result || !vector) return 0;
@@ -375,7 +375,7 @@ static int BreezeVector3D_Normalize(BreezeVector3D* result, const BreezeVector3D
  * @param vector 输入向量
  * @return 成功返回1，失败返回0
  */
-static int BreezeVector4D_Normalize(BreezeVector4D* result, const BreezeVector4D* vector) {
+static inline int BreezeVector4D_Normalize(BreezeVector4D* result, const BreezeVector4D* vector) {
     float length;
     
     if (!result || !vector) return 0;
