@@ -6,7 +6,7 @@
 # reason, not a regeneration.
 # format: <case> <value>...
 # Most values are the C generator's %.9g. The ones re-locked when a deliberate
-# behaviour change moved them (REVIEW §51-§55) are Zig's shortest round-trip
+# behaviour change moved them (REVIEW §51-§56) are Zig's shortest round-trip
 # decimal. Both parse back to the same f32, which is what the comparison needs.
 vec2_layout 8 4
 vec3_layout 12 4
@@ -531,7 +531,7 @@ canny_plateau_direction 0 0 0 0 2 0 0 2 0 0 0 0 0 0 0
 canny_nms_plateau 0 0 0 0 400 0 0 400 0 0 0 0 0 0 0
 canny_hysteresis_thresholds 0 0 0 0 0 0 0 0 0 0 0 0 255 0 0 0 0 0 0 0 0 0 0 0 0
 canny_hysteresis_chain_forward 0 0 0 0 0 0 0 0 0 0 0 255 255 255 0 0 0 0 0 0 0 0 0 0 0
-canny_hysteresis_chain_backward 0 0 0 0 0 0 0 0 0 0 0 0 255 255 0 0 0 0 0 0 0 0 0 0 0
+canny_hysteresis_chain_backward 0 0 0 0 0 0 0 0 0 0 0 255 255 255 0 0 0 0 0 0 0 0 0 0 0
 canny_staged_edges 0 0 0 0 0 0 255 255 255 0 0 255 0 0 0 0 255 0 255 0 0 0 0 0 0
 canny_staged_edges_sigma_0p5 0 0 0 0 0 0 255 0 0 0 0 0 255 255 0 0 0 255 255 0 0 0 0 0 0
 canny_edges_5x5_all_below 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0

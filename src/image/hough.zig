@@ -326,6 +326,11 @@ pub fn houghCircles(
     }
 
     var circle_count: usize = 0;
+    // A 1-pixel-wide or 1-pixel-tall image has no interior to scan, and the C's
+    // loops are simply empty there (`1 < width - 1` is false). In Zig
+    // `1..width - 1` underflows instead, so the empty case is spelled out.
+    if (width < 3 or height < 3) return 0;
+
     // x outside, then y, then radius - the order a cap cuts off in.
     for (1..width - 1) |x| {
         if (circle_count == circles.len) break;
@@ -656,6 +661,17 @@ test "hough circles: the ring, and a threshold above every vote" {
     try expectCircles(&corpus, "hough_circles_threshold_above_all", &circles, count);
     try std.testing.expectEqual(@as(usize, 0), count);
     try std.testing.expectEqual(@as(i32, -1), circles[0].votes);
+
+    // A one-pixel image has no interior for the peak scan, which is an empty loop
+    // in the C and an underflow panic in Zig without the guard: this is a crash
+    // becoming a no-op, not a behaviour change.
+    var single = [_]u8{255};
+    var single_acc = [_]i32{0} ** 2;
+    var single_circles: [1]Circle = undefined;
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        try houghCircles(&single, &single_circles, &single_acc, 1, 1, 1, 2, 0, 0),
+    );
 }
 
 test "hough: the buffers are checked, and the accumulator sizes are exact" {

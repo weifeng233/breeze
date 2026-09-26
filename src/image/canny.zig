@@ -5,25 +5,27 @@
 //! the Gaussian kernel, `magnitude`, `direction`, `nms`); all six are the
 //! caller's here.
 //!
-//! Three things about the C are worth knowing before reading the code, because
-//! none of them are visible from the signatures:
+//! Three things about the C are worth knowing before reading the code. Two were
+//! defects and are fixed here (docs/REVIEW.md §46 records the C's behaviour, §56
+//! the fixes and their evidence); the third is a behaviour the port keeps:
 //!
-//!   * **Only the source is strided.** `BreezeCannyGradient` reads with `stride`
-//!     but writes `magnitude` and `direction` at `y * width + x`; suppression and
-//!     hysteresis take no stride at all; and the pipeline writes its `dst` packed
-//!     even though it accepts a `stride_bytes`. So every buffer except `src` is
-//!     `width * height`, and a caller who passes a strided `dst` gets it written
-//!     as if it were packed. The corpus records both halves
-//!     (`canny_gradient_stride_magnitude` beside the packed one).
+//!   * **Only the source and the blurred image were strided.** `BreezeCannyGradient`
+//!     reads with `stride` but writes `magnitude` and `direction` at `y * width + x`;
+//!     suppression takes no stride at all; and the pipeline wrote its `dst` packed
+//!     even though it accepts a `stride_bytes`, so a caller passing a strided `dst`
+//!     got it written as if it were packed. `magnitude`, `direction` and `nms` are
+//!     still `width * height` by design - they are the C's `malloc`'d intermediates -
+//!     but `dst` is the caller's image and now honours the stride.
+//!   * **The hysteresis was a single pass and said so.** Its comment noted that a
+//!     weak pixel promoted to strong is not re-examined, so propagation depended on
+//!     the scan order and a chain running against it stopped at its first weak
+//!     pixel. It now propagates to a fixed point, so the two directions agree.
 //!   * **The gradient leaves its border untouched.** The 3x3 window only visits
 //!     the interior, and unlike the threshold functions there is no clearing pass
 //!     first, so `magnitude` and `direction` keep whatever the caller left at
 //!     rows 0 and `height - 1` and at columns 0 and `width - 1`. Suppression is
-//!     what zeroes its own border.
-//!   * **The hysteresis is a single pass, and says so.** Its own comment notes
-//!     that a weak pixel promoted to strong is not re-examined; the propagation
-//!     therefore depends on the scan order, and a chain running against the scan
-//!     stops at its first weak pixel. The corpus records both directions.
+//!     what zeroes its own border. That one is kept: it is definable, and the
+//!     `canny_gradient_border_*` cases pin it.
 
 const std = @import("std");
 
@@ -167,6 +169,14 @@ pub fn nonMaxSuppression(
 
 /// Double thresholding and hysteresis.
 ///
+/// `nms` and `scratch` are packed, `width * height` each: they are the C's
+/// `malloc`'d intermediates. `edges` is the caller's image and is written at
+/// `stride_bytes`. That last part is the fix for the C's
+/// `BreezeCannyHysteresis`, which took no stride and wrote `dst` packed - a
+/// strided destination got its padding filled with edge values, and a caller
+/// laying the image out in a wider buffer got it scrambled
+/// (docs/REVIEW.md §46, §56).
+///
 /// `scratch` is the C's `calloc(width * height)`, and it is zeroed here so that
 /// the caller's buffer contents do not matter - the C gets zeros from `calloc`
 /// whatever was in the heap before.
@@ -178,9 +188,11 @@ pub fn hysteresis(
     height: usize,
     low_threshold: f32,
     high_threshold: f32,
+    stride_bytes: usize,
 ) Error!void {
+    const stride = common.strideOf(width, stride_bytes);
     try common.checkFullBuffer(nms.len, width, height, width);
-    try common.checkFullBuffer(edges.len, width, height, width);
+    try common.checkRegion(edges.len, width, height, stride);
     try common.checkFullBuffer(scratch.len, width, height, width);
 
     const strong_edges = scratch[0 .. width * height];
@@ -188,12 +200,13 @@ pub fn hysteresis(
 
     for (0..height) |y| {
         for (0..width) |x| {
-            const idx = y * width + x;
-            const mag = nms[idx];
+            const cell = y * width + x;
+            const mag = nms[cell];
+            const idx = y * stride + x;
 
             if (mag >= high_threshold) {
                 edges[idx] = 255;
-                strong_edges[idx] = 1;
+                strong_edges[cell] = 1;
             } else if (mag >= low_threshold) {
                 edges[idx] = 128;
             } else {
@@ -202,34 +215,67 @@ pub fn hysteresis(
         }
     }
 
-    // One pass, in scan order, over the interior only. A strong pixel promotes
-    // the weak neighbours it has not passed yet; the newly strong pixel is not
-    // revisited, which is why the result depends on the direction of the chain.
-    for (1..height - 1) |y| {
-        for (1..width - 1) |x| {
-            const idx = y * width + x;
-            if (strong_edges[idx] == 0) continue;
+    // Propagate to a fixed point instead of in one pass in scan order.
+    //
+    // The C's comment admits its single pass "depends on the next iteration": a
+    // strong pixel could only promote weak neighbours it had not already walked
+    // past, so a chain pointing one way came out whole while the same chain
+    // pointing the other way stopped at its first weak pixel - the two cases
+    // below used to disagree, and the test asserted the disagreement
+    // (docs/REVIEW.md §46).
+    //
+    // This pass is monotone - it only ever turns a 128 into a 255 - so repeating
+    // it until a pass changes nothing reaches the *least* fixed point, which is
+    // independent of scan order: the answer is the closure of the strong set
+    // under the weak-neighbour relation, which is what hysteresis means.
+    //
+    // The cost is passes, not a queue, and it is the chain length plus one: the
+    // last pass is the one that changes nothing and ends the loop. Measured on the
+    // fixtures below - 1 pass when nothing propagates, 2 for the two-pixel chain,
+    // 5 for the four-pixel chain that runs against the scan order - where the C's
+    // single pass cost one and got the last one wrong. That is the trade for
+    // order-independence, and it needs no buffer the caller has to supply.
+    //
+    // Still the interior only, as in the C: a border pixel can be promoted but
+    // does not itself promote, which is why this cannot become a single sweep.
+    // `width < 3` is the C's empty loop; without the check `1..width - 1` is a
+    // panic in Zig rather than a no-op (the C's `1 < width - 1` is simply false).
+    if (width >= 3 and height >= 3) {
+        var changed = true;
+        while (changed) {
+            changed = false;
+            for (1..height - 1) |y| {
+                for (1..width - 1) |x| {
+                    const cell = y * width + x;
+                    if (strong_edges[cell] == 0) continue;
 
-            for (0..3) |kj| {
-                for (0..3) |ki| {
-                    if (kj == 1 and ki == 1) continue;
+                    for (0..3) |kj| {
+                        for (0..3) |ki| {
+                            if (kj == 1 and ki == 1) continue;
 
-                    const neighbour_y = y + kj - 1;
-                    const neighbour_x = x + ki - 1;
-                    if (neighbour_x >= width or neighbour_y >= height) continue;
+                            const neighbour_y = y + kj - 1;
+                            const neighbour_x = x + ki - 1;
+                            if (neighbour_x >= width or neighbour_y >= height) continue;
 
-                    const neighbour = neighbour_y * width + neighbour_x;
-                    if (edges[neighbour] == 128) {
-                        edges[neighbour] = 255;
-                        strong_edges[neighbour] = 1;
+                            const neighbour_cell = neighbour_y * width + neighbour_x;
+                            const neighbour = neighbour_y * stride + neighbour_x;
+                            if (edges[neighbour] == 128) {
+                                edges[neighbour] = 255;
+                                strong_edges[neighbour_cell] = 1;
+                                changed = true;
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    for (edges[0 .. width * height]) |*edge| {
-        if (edge.* == 128) edge.* = 0;
+    for (0..height) |y| {
+        for (0..width) |x| {
+            const idx = y * stride + x;
+            if (edges[idx] == 128) edges[idx] = 0;
+        }
     }
 }
 
@@ -243,7 +289,8 @@ pub fn hysteresis(
 /// it - the gradient has already consumed it, and the hysteresis zeroes it before
 /// reading anything.
 ///
-/// `dst` is written packed whatever `stride_bytes` says - see the module comment.
+/// `dst` is written at `stride_bytes` too - it is the caller's image, and the C's
+/// `BreezeCannyHysteresis` writing it packed was a bug (see the module comment).
 pub fn edgeDetection(
     src: []const u8,
     dst: []u8,
@@ -266,7 +313,7 @@ pub fn edgeDetection(
     try common.checkFullBuffer(magnitude.len, width, height, width);
     try common.checkFullBuffer(direction.len, width, height, width);
     try common.checkFullBuffer(nms_result.len, width, height, width);
-    try common.checkFullBuffer(dst.len, width, height, width);
+    try common.checkRegion(dst.len, width, height, stride);
 
     // The C mallocs `magnitude` and `direction`, the gradient below writes only
     // their interior, and suppression reads border pixels from them whenever a
@@ -296,7 +343,7 @@ pub fn edgeDetection(
 
     try gradient(blurred, magnitude, direction, width, height, stride_bytes);
     try nonMaxSuppression(magnitude, direction, nms_result, width, height);
-    try hysteresis(nms_result, dst, blurred, width, height, low_threshold, high_threshold);
+    try hysteresis(nms_result, dst, blurred, width, height, low_threshold, high_threshold, stride_bytes);
 }
 
 // --- tests ------------------------------------------------------------------
@@ -430,7 +477,7 @@ test "canny suppression: plateaus keep both pixels" {
     try std.testing.expectEqual(fnms[4], fnms[7]);
 }
 
-test "canny hysteresis: thresholds, and the scan order it depends on" {
+test "canny hysteresis: thresholds, and a chain that propagates both ways" {
     const corpus = try corpus_mod.Corpus.load();
 
     var nms = [_]f32{10.0} ** 25;
@@ -438,21 +485,22 @@ test "canny hysteresis: thresholds, and the scan order it depends on" {
     var scratch: [25]u8 = undefined;
 
     nms[12] = 100.0;
-    try hysteresis(&nms, &edges, &scratch, 5, 5, 50.0, 100.0);
+    try hysteresis(&nms, &edges, &scratch, 5, 5, 50.0, 100.0, 0);
     try expectBytes(&corpus, "canny_hysteresis_thresholds", &edges);
     try std.testing.expectEqual(@as(u8, 255), edges[12]);
     try std.testing.expectEqual(@as(u8, 0), edges[11]);
 
-    // A chain running with the scan order propagates all the way; the same chain
-    // reversed stops at its first weak pixel, because the loop has already gone
-    // past the strong end when it reaches it. That asymmetry is the C's, and its
-    // own comment says so.
+    // A chain of weak pixels hanging off a strong one is the closure of the strong
+    // set, whichever way the chain points. The C's single pass propagated with the
+    // scan order, so the same three pixels reversed stopped at the first weak one -
+    // §46 recorded both directions and asserted that they disagreed. They are the
+    // same pattern with the strong pixel at the other end, so they must agree now.
     var forward = [_]f32{0} ** 25;
     forward[11] = 100.0;
     forward[12] = 50.0;
     forward[13] = 50.0;
     var forward_edges = [_]u8{0xEE} ** 25;
-    try hysteresis(&forward, &forward_edges, &scratch, 5, 5, 50.0, 100.0);
+    try hysteresis(&forward, &forward_edges, &scratch, 5, 5, 50.0, 100.0, 0);
     try expectBytes(&corpus, "canny_hysteresis_chain_forward", &forward_edges);
 
     var backward = [_]f32{0} ** 25;
@@ -460,12 +508,52 @@ test "canny hysteresis: thresholds, and the scan order it depends on" {
     backward[12] = 50.0;
     backward[11] = 50.0;
     var backward_edges = [_]u8{0xEE} ** 25;
-    try hysteresis(&backward, &backward_edges, &scratch, 5, 5, 50.0, 100.0);
+    try hysteresis(&backward, &backward_edges, &scratch, 5, 5, 50.0, 100.0, 0);
     try expectBytes(&corpus, "canny_hysteresis_chain_backward", &backward_edges);
 
     try std.testing.expectEqual(@as(u8, 255), forward_edges[11]);
-    try std.testing.expectEqual(@as(u8, 0), backward_edges[11]);
-    try std.testing.expect(!std.mem.eql(u8, &forward_edges, &backward_edges));
+    try std.testing.expectEqual(@as(u8, 255), backward_edges[11]);
+    try std.testing.expectEqualSlices(u8, &forward_edges, &backward_edges);
+
+    // The closure is not "keep everything above the low threshold": a weak pixel
+    // with no strong pixel next to it is still cleared.
+    var island = [_]f32{0} ** 25;
+    island[6] = 100.0;
+    island[18] = 50.0;
+    var island_edges = [_]u8{0xEE} ** 25;
+    try hysteresis(&island, &island_edges, &scratch, 5, 5, 50.0, 100.0, 0);
+    try std.testing.expectEqual(@as(u8, 255), island_edges[6]);
+    try std.testing.expectEqual(@as(u8, 0), island_edges[18]);
+
+    // A chain running *against* the scan order pins the fixed point rather than
+    // "one extra pass". One pass promotes nothing here at all: the loop walks
+    // (1,1) first and reaches the strong pixel at (5,5) last, so the only pixel it
+    // can promote is (4,4), which it has already passed. Two passes reach (3,3),
+    // and the closure needs as many passes as the chain is long.
+    var long_chain = [_]f32{0} ** 49;
+    for (1..6) |k| long_chain[k * 7 + k] = 50.0;
+    long_chain[5 * 7 + 5] = 100.0;
+    var long_edges = [_]u8{0xEE} ** 49;
+    var long_scratch = [_]u8{0} ** 49;
+    try hysteresis(&long_chain, &long_edges, &long_scratch, 7, 7, 50.0, 100.0, 0);
+    for (1..6) |k| try std.testing.expectEqual(@as(u8, 255), long_edges[k * 7 + k]);
+
+    // Smaller than 3x3 is no interior at all, which the C gets as an empty loop.
+    // Without the guard `1..width - 1` is an underflow panic in Zig, so this is a
+    // crash becoming a no-op rather than a behaviour change.
+    var one_nms = [_]f32{100.0} ** 1;
+    var one_edges = [_]u8{0xEE} ** 1;
+    var one_scratch = [_]u8{0} ** 1;
+    try hysteresis(&one_nms, &one_edges, &one_scratch, 1, 1, 50.0, 100.0, 0);
+    try std.testing.expectEqual(@as(u8, 255), one_edges[0]);
+
+    var column_nms = [_]f32{0} ** 5;
+    column_nms[2] = 100.0;
+    var column_edges = [_]u8{0xEE} ** 5;
+    var column_scratch = [_]u8{0} ** 5;
+    try hysteresis(&column_nms, &column_edges, &column_scratch, 1, 5, 50.0, 100.0, 0);
+    try std.testing.expectEqual(@as(u8, 255), column_edges[2]);
+    try std.testing.expectEqual(@as(u8, 0), column_edges[0]);
 }
 
 test "canny: the whole pipeline matches the C when the border is defined" {
@@ -564,13 +652,15 @@ test "canny: the whole pipeline matches the C when the border is defined" {
     try std.testing.expectEqualSlices(u8, &reference, &clean);
     try expectBytes(&corpus, "canny_staged_edges", &clean);
 
-    // A strided source: the blur and the gradient read it with the stride, and
-    // everything downstream - `dst` included - is packed. The answer therefore has
-    // to be the same as for the packed source, which is what pins the stride being
-    // forwarded into the blur instead of being replaced by the width.
+    // A strided source: the blur, the gradient and the output all use the stride,
+    // so the answer is the same edges laid out in a wider image. Reading the
+    // strided output back row by row and comparing the result with the corpus's
+    // packed case is what pins the stride reaching `dst`; the padding check below
+    // is the other half, because the C wrote `dst` packed and so not only scrambled
+    // this layout but wrote edge values into the padding.
     var widesrc = [_]u8{0xAA} ** 30;
     for (0..5) |y| @memcpy(widesrc[y * 6 ..][0..5], square[y * 5 ..][0..5]);
-    var wide_dst = [_]u8{0xEE} ** 25;
+    var wide_dst = [_]u8{0xAA} ** 30;
     var wide_blurred = [_]u8{0} ** 30;
     var wide_blur_temp = [_]u8{0} ** 30;
     try edgeDetection(
@@ -589,7 +679,10 @@ test "canny: the whole pipeline matches the C when the border is defined" {
         60.0,
         6,
     );
-    try expectBytes(&corpus, "canny_staged_edges", &wide_dst);
+    var wide_packed = [_]u8{0} ** 25;
+    for (0..5) |y| @memcpy(wide_packed[y * 5 ..][0..5], wide_dst[y * 6 ..][0..5]);
+    try expectBytes(&corpus, "canny_staged_edges", &wide_packed);
+    for (0..5) |y| try std.testing.expectEqual(@as(u8, 0xAA), wide_dst[y * 6 + 5]);
 
     // With thresholds above every magnitude the answer is a zeroed image rather
     // than the 0xEE the buffer held: `dst` is written everywhere, unlike the
@@ -631,7 +724,25 @@ test "canny: every buffer is checked" {
     try std.testing.expectError(Error.InvalidSize, gradient(&square, &magnitude, &direction, 0, 5, 0));
 
     try std.testing.expectError(Error.BufferTooSmall, nonMaxSuppression(&small_floats, &direction, &nms, 5, 5));
-    try std.testing.expectError(Error.BufferTooSmall, hysteresis(&nms, &edges, &small_bytes, 5, 5, 1.0, 2.0));
+    try std.testing.expectError(Error.BufferTooSmall, hysteresis(&nms, &edges, &small_bytes, 5, 5, 1.0, 2.0, 0));
+
+    // `edges` is written at the stride now, so a packed-sized destination is not
+    // enough for a strided one: 5x5 at stride 6 touches 29 bytes, and refusing 25
+    // is what keeps the last row from being dropped or overrun.
+    var scratch = [_]u8{0} ** 25;
+    try std.testing.expectError(Error.BufferTooSmall, hysteresis(&nms, &edges, &scratch, 5, 5, 1.0, 2.0, 6));
+
+    // The pipeline carries one stride for every image it touches, `dst` included,
+    // so the same 25-byte destination is refused there too - and it is refused at
+    // `dst`, since the blurred buffers below are sized for the stride.
+    var wide_src = [_]u8{0} ** 30;
+    var wide_blurred = [_]u8{0} ** 30;
+    var wide_blur_temp = [_]u8{0} ** 30;
+    var kernel: [31]f32 = undefined;
+    try std.testing.expectError(
+        Error.BufferTooSmall,
+        edgeDetection(&wide_src, &edges, &wide_blurred, &wide_blur_temp, &kernel, &magnitude, &direction, &nms, 5, 5, 1.0, 1.0, 2.0, 6),
+    );
 
     // The pipeline's kernel scratch is sized by the sigma rule, so a too-small one
     // is refused rather than overrun.
