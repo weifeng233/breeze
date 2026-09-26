@@ -14,6 +14,7 @@ const std = @import("std");
 pub const vector = @import("vector.zig");
 pub const matrix = @import("matrix.zig");
 pub const quaternion = @import("quaternion.zig");
+pub const interpolation = @import("interpolation.zig");
 
 test {
     std.testing.refAllDecls(@This());

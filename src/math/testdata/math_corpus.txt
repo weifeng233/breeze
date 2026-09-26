@@ -117,3 +117,32 @@ quat_slerp_t1 0.707106829 0 0 0.707106829
 quat_slerp_clamped 0.707106829 0 0 0.707106829
 quat_slerp_linear_branch 1 0 0 0
 quat_slerp_negative_dot 0.923879504 0 0 0.382683426
+interp_linear 1
+interp_linear_degenerate 5
+interp_cosine_mu0 0
+interp_cosine_mu025 1.46446609
+interp_cosine_mu05 5
+interp_cosine_mu1 10
+interp_hermite 1.5
+interp_hermite_tension_bias 1.5
+spline_init_ok 1
+spline_a 0 1 0 1
+spline_b 1.71428561 -0.428571463 0 0.428571343
+spline_c 0 -2.14285707 2.57142854 -2.14285707 0
+spline_d -0.714285672 1.57142866 -1.57142866 0.714285672
+spline_eval_below_range 0
+spline_eval_at_knot0 0
+spline_eval_at_knot2 0
+spline_eval_between 0.446428597
+spline_eval_above_range 0
+spline_init_linear_ok 1
+spline_linear_at_0p5 2
+spline_linear_at_2p5 6
+spline_init_not_increasing_ok 0
+spline_init_too_few_ok 0
+bezier_layout 8 4
+bezier_quadratic_t05 1.5 2.25
+bezier_quadratic_t0 0 0
+bezier_cubic_t025 1.0625 1.6875
+bezier_cubic_t05 2.5 2.25
+bezier_cubic_t1 5 0

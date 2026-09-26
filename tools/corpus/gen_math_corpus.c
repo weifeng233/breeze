@@ -21,14 +21,15 @@
  * fixture loses nothing, so a mismatch is a real difference and not a printing
  * artefact.
  *
- * Cases are added module by module as the migration proceeds. vector, matrix and
- * quaternion are done; interpolation follows.
+ * Cases are added module by module as the migration proceeds; vector, matrix,
+ * quaternion and interpolation are covered.
  */
 
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 
+#include "../../include/breeze/math/interpolation.h"
 #include "../../include/breeze/math/matrix.h"
 #include "../../include/breeze/math/quaternion.h"
 #include "../../include/breeze/math/vector.h"
@@ -62,6 +63,20 @@ static void pq(const char* name, const BreezeQuaternion* q) {
 
 static void p3f(const char* name, float a, float b, float c) {
     printf("%s %.9g %.9g %.9g\n", name, (double)a, (double)b, (double)c);
+}
+
+/* A run of coefficients. The C spline never writes a[n-1], b[n-1] or d[n-1] -
+ * `Evaluate` cannot reach them - so only the initialised range is printed here,
+ * and the port's arrays are sized to exactly that range. */
+static void pvals(const char* name, const float* values, int n) {
+    int i;
+    printf("%s", name);
+    for (i = 0; i < n; i++) printf(" %.9g", (double)values[i]);
+    putchar('\n');
+}
+
+static void pbp(const char* name, const BreezeBezierPoint* p) {
+    printf("%s %.9g %.9g\n", name, (double)p->x, (double)p->y);
 }
 
 /* A matrix prints its *used* region row-major, and the shape lives in the case
@@ -449,6 +464,78 @@ int main(void) {
     BreezeQuaternion_Init(&qb, -1.0f, 0.0f, 0.0f, 0.0f);
     BreezeQuaternion_Slerp(&qr, &qa, &qb, 0.5f);
     pq("quat_slerp_negative_dot", &qr);
+
+    /* --- interpolation --------------------------------------------------- */
+    /* The three scalar curves. Cosine is the one that brings cosf in; Hermite
+     * takes the neighbouring points and two shape parameters. */
+    pf("interp_linear", BreezeInterpolation_Linear(0.0f, 0.0f, 2.0f, 4.0f, 0.5f));
+    /* x0 and x1 within 1e-6 of each other: the C code answers with the midpoint
+     * rather than dividing by (almost) zero. */
+    pf("interp_linear_degenerate", BreezeInterpolation_Linear(1.0f, 3.0f, 1.0f + 1.0e-7f, 7.0f, 5.0f));
+
+    pf("interp_cosine_mu0", BreezeInterpolation_Cosine(0.0f, 10.0f, 0.0f));
+    pf("interp_cosine_mu025", BreezeInterpolation_Cosine(0.0f, 10.0f, 0.25f));
+    pf("interp_cosine_mu05", BreezeInterpolation_Cosine(0.0f, 10.0f, 0.5f));
+    pf("interp_cosine_mu1", BreezeInterpolation_Cosine(0.0f, 10.0f, 1.0f));
+
+    pf("interp_hermite", BreezeInterpolation_CubicHermite(0.0f, 1.0f, 2.0f, 3.0f, 0.5f, 0.0f, 0.0f));
+    pf("interp_hermite_tension_bias", BreezeInterpolation_CubicHermite(0.0f, 1.0f, 2.0f, 3.0f, 0.5f, 0.3f, 0.2f));
+
+    float spx[] = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
+    float spy[] = {0.0f, 1.0f, 0.0f, 1.0f, 0.0f};
+    BreezeSplineInterpolation sp;
+
+    pi("spline_init_ok", BreezeSplineInterpolation_Init(&sp, spx, spy, 5, 0));
+    pvals("spline_a", sp.a, 4);
+    pvals("spline_b", sp.b, 4);
+    pvals("spline_c", sp.c, 5);
+    pvals("spline_d", sp.d, 4);
+
+    /* Evaluate clamps outside the knot range and lands exactly on y at a knot. */
+    pf("spline_eval_below_range", BreezeSplineInterpolation_Evaluate(&sp, -1.0f));
+    pf("spline_eval_at_knot0", BreezeSplineInterpolation_Evaluate(&sp, 0.0f));
+    pf("spline_eval_at_knot2", BreezeSplineInterpolation_Evaluate(&sp, 2.0f));
+    pf("spline_eval_between", BreezeSplineInterpolation_Evaluate(&sp, 1.5f));
+    pf("spline_eval_above_range", BreezeSplineInterpolation_Evaluate(&sp, 9.0f));
+    BreezeSplineInterpolation_Free(&sp);
+
+    /* Collinear knots: a natural cubic spline through them is that line exactly,
+     * so this case doubles as a check that is independent of the oracle. */
+    float linx[] = {0.0f, 1.0f, 2.0f, 3.0f};
+    float liny[] = {1.0f, 3.0f, 5.0f, 7.0f};
+    pi("spline_init_linear_ok", BreezeSplineInterpolation_Init(&sp, linx, liny, 4, 0));
+    pf("spline_linear_at_0p5", BreezeSplineInterpolation_Evaluate(&sp, 0.5f));
+    pf("spline_linear_at_2p5", BreezeSplineInterpolation_Evaluate(&sp, 2.5f));
+    BreezeSplineInterpolation_Free(&sp);
+
+    /* Knots that do not strictly increase: refused, and the C reason is a
+     * division that would be by (almost) zero. */
+    float badx[] = {0.0f, 1.0f, 1.0f, 3.0f};
+    float bady[] = {0.0f, 1.0f, 2.0f, 3.0f};
+    pi("spline_init_not_increasing_ok", BreezeSplineInterpolation_Init(&sp, badx, bady, 4, 0));
+
+    pi("spline_init_too_few_ok", BreezeSplineInterpolation_Init(&sp, spx, spy, 1, 0));
+
+    /* Bezier: pure polynomial evaluation, no solver. */
+    BreezeBezierPoint bp0 = {0.0f, 0.0f};
+    BreezeBezierPoint bp1 = {1.0f, 3.0f};
+    BreezeBezierPoint bp2 = {4.0f, 3.0f};
+    BreezeBezierPoint bp3 = {5.0f, 0.0f};
+    BreezeBezierPoint bp;
+
+    printf("bezier_layout %zu %zu\n", sizeof bp0, _Alignof(BreezeBezierPoint));
+
+    BreezeBezierCurve_Quadratic(&bp0, &bp1, &bp2, 0.5f, &bp);
+    pbp("bezier_quadratic_t05", &bp);
+    BreezeBezierCurve_Quadratic(&bp0, &bp1, &bp2, 0.0f, &bp);
+    pbp("bezier_quadratic_t0", &bp);
+
+    BreezeBezierCurve_Cubic(&bp0, &bp1, &bp2, &bp3, 0.25f, &bp);
+    pbp("bezier_cubic_t025", &bp);
+    BreezeBezierCurve_Cubic(&bp0, &bp1, &bp2, &bp3, 0.5f, &bp);
+    pbp("bezier_cubic_t05", &bp);
+    BreezeBezierCurve_Cubic(&bp0, &bp1, &bp2, &bp3, 1.0f, &bp);
+    pbp("bezier_cubic_t1", &bp);
 
     return 0;
 }
