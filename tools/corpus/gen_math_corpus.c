@@ -41,6 +41,7 @@
 #include "../../include/breeze/image/gaussian_blur.h"
 #include "../../include/breeze/image/morphology.h"
 #include "../../include/breeze/image/canny_edge.h"
+#include "../../include/breeze/image/hough_transform.h"
 #include "../../include/breeze/control/platform/balance_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
@@ -110,6 +111,26 @@ static void pbytes(const char* name, const unsigned char* bytes, int n) {
     int i;
     printf("%s", name);
     for (i = 0; i < n; i++) printf(" %d", (int)bytes[i]);
+    putchar('\n');
+}
+
+/* Detected Hough lines and circles: a count, then a fixed number of fields each,
+ * so the Zig side can read them without knowing the struct layout. */
+static void plines(const char* name, const BreezeHoughLine* lines, int n) {
+    int i;
+    printf("%s %d", name, n);
+    for (i = 0; i < n; i++) {
+        printf(" %.9g %.9g %d", (double)lines[i].rho, (double)lines[i].theta, lines[i].votes);
+    }
+    putchar('\n');
+}
+
+static void pcircles(const char* name, const BreezeHoughCircle* circles, int n) {
+    int i;
+    printf("%s %d", name, n);
+    for (i = 0; i < n; i++) {
+        printf(" %d %d %d %d", circles[i].x, circles[i].y, circles[i].radius, circles[i].votes);
+    }
     putchar('\n');
 }
 
@@ -2376,6 +2397,207 @@ int main(void) {
         memset(dst, 0xEE, sizeof dst);
         BreezeCannyEdgeDetection(img, dst, 5, 5, 1.0f, 1.0e9f, 1.0e9f, 0);
         pbytes("canny_edges_5x5_all_below", dst, 25);
+    }
+
+    /* --- Hough -------------------------------------------------------------- */
+    /* A 5x5 cross: a full vertical line (x = 2) and a full horizontal one (y = 2),
+     * each of which votes five times for its own `rho` at one theta - 0 radians
+     * for the vertical one, 90 degrees for the horizontal one. */
+    {
+        const unsigned char cross[25] = {0,   0,   255, 0,   0,
+                                         0,   0,   255, 0,   0,
+                                         255, 255, 255, 255, 255,
+                                         0,   0,   255, 0,   0,
+                                         0,   0,   255, 0,   0};
+        BreezeHoughLine lines[8];
+        int count, i;
+
+        for (i = 0; i < 8; i++) {
+            lines[i].rho = -1.0f;
+            lines[i].theta = -1.0f;
+            lines[i].votes = -1;
+        }
+        count = BreezeHoughLines(cross, 5, 5, lines, 8, 3, 0);
+        plines("hough_lines_cross", lines, count);
+
+        /* The comparison is strictly `value > threshold`, so a threshold equal to
+         * the winning vote count finds nothing at all. */
+        count = BreezeHoughLines(cross, 5, 5, lines, 8, 5, 0);
+        plines("hough_lines_threshold_at_peak", lines, count);
+
+        /* A blank image: no votes anywhere, so nothing is written to `lines` and
+         * the -1 sentinels above survive. That is what makes "the output buffer is
+         * untouched" an observable rather than a claim. */
+        for (i = 0; i < 8; i++) {
+            lines[i].rho = -1.0f;
+            lines[i].theta = -1.0f;
+            lines[i].votes = -1;
+        }
+        {
+            unsigned char blank[25];
+            memset(blank, 0, sizeof blank);
+            count = BreezeHoughLines(blank, 5, 5, lines, 8, 0, 0);
+            plines("hough_lines_blank", lines, count);
+        }
+
+        /* `max_lines` caps the scan, and the scan order is rho first and theta
+         * second - so a cap of 1 keeps whichever maximum comes first in that
+         * order, not the strongest one. */
+        count = BreezeHoughLines(cross, 5, 5, lines, 1, 3, 0);
+        plines("hough_lines_capped_at_1", lines, count);
+    }
+
+    /* The same line horizontal and vertical - and only one of them is findable.
+     *
+     * The peak scan runs `j` from 1 to theta_count - 2, so theta = 0 and theta =
+     * 179 degrees are never *candidates* for a maximum. A vertical line's votes
+     * pile up at theta = 0, which is unreachable, and what gets reported instead
+     * are the near-vertical bins that happen to collect the same pixels
+     * (theta around 164 degrees, four votes each). Raising the threshold above
+     * those leaves nothing at all, even though the line is right there.
+     *
+     * The horizontal line is found - and note *which* rho: 1, not 2. The bin index
+     * is `(int)(rho + diagonal)`, which truncates, so a rho of 1.93 lands in the
+     * bin that reports 1. Rounding instead of truncating would move every reported
+     * rho by up to one pixel, which is why this is pinned rather than tidied. */
+    {
+        unsigned char vertical[25];
+        unsigned char horizontal[25];
+        BreezeHoughLine lines[4];
+        int count, i;
+
+        memset(vertical, 0, sizeof vertical);
+        memset(horizontal, 0, sizeof horizontal);
+        for (i = 0; i < 5; i++) {
+            vertical[i * 5 + 2] = 255;
+            horizontal[2 * 5 + i] = 255;
+        }
+
+        for (i = 0; i < 4; i++) { lines[i].rho = -1.0f; lines[i].theta = -1.0f; lines[i].votes = -1; }
+        count = BreezeHoughLines(vertical, 5, 5, lines, 4, 3, 0);
+        plines("hough_lines_vertical_only", lines, count);
+
+        /* At the true peak's own vote count: the bin that holds it is at theta =
+         * 0, which is never a candidate, so the answer is empty. What *does* get
+         * reported for this line is the near-boundary bins above - the same five
+         * pixels, collected at theta around 167 degrees instead of 0. The line is
+         * found, rotated by the width of the unreachable band. */
+        for (i = 0; i < 4; i++) { lines[i].rho = -1.0f; lines[i].theta = -1.0f; lines[i].votes = -1; }
+        count = BreezeHoughLines(vertical, 5, 5, lines, 4, 5, 0);
+        plines("hough_lines_vertical_at_peak", lines, count);
+
+        for (i = 0; i < 4; i++) { lines[i].rho = -1.0f; lines[i].theta = -1.0f; lines[i].votes = -1; }
+        count = BreezeHoughLines(horizontal, 5, 5, lines, 4, 3, 0);
+        plines("hough_lines_horizontal_only", lines, count);
+    }
+
+    /* A long vertical line, where theta = 0 is the *only* column above the
+     * threshold.
+     *
+     * The five-pixel line above spreads its votes thinly enough near theta = 0
+     * that the near-boundary bins are found first anyway, so a probe that made
+     * theta = 0 a candidate stayed green against it. Eleven pixels concentrate
+     * them: at theta = 0 the whole line votes into one bin, at theta = 1 degree
+     * it still does (the spread across eleven pixels is 0.19 of a bin), and those
+     * are the only two. Which one gets reported is therefore decided purely by
+     * whether the first column is examined.
+     *
+     * Five slots, not four: the four theta-175-to-178 columns each hold all
+     * eleven votes and come first in rho order, so a cap of four never reaches
+     * theta = 0 at all. With the fifth slot the last entry is the one that moves -
+     * 1 degree with the C's scan, 0 degrees if the first column is made a
+     * candidate. */
+    {
+        unsigned char tall[121];
+        BreezeHoughLine lines[5];
+        int i, count;
+
+        memset(tall, 0, sizeof tall);
+        for (i = 0; i < 11; i++) tall[i * 11 + 5] = 255;
+
+        for (i = 0; i < 5; i++) { lines[i].rho = -1.0f; lines[i].theta = -1.0f; lines[i].votes = -1; }
+        count = BreezeHoughLines(tall, 11, 11, lines, 5, 10, 0);
+        plines("hough_lines_long_vertical", lines, count);
+    }
+
+    /* Drawing a detected line, clipped to the image. */
+    {
+        BreezeHoughLine line;
+        unsigned char dst[25];
+        int i;
+
+        for (i = 0; i < 3; i++) {
+            const char* names[3] = {"hough_draw_vertical", "hough_draw_horizontal",
+                                    "hough_draw_oblique"};
+            memset(dst, 0xEE, sizeof dst);
+
+            if (i == 0) { line.rho = 2.0f; line.theta = 0.0f; }
+            else if (i == 1) { line.rho = 2.0f; line.theta = 1.57079633f; }
+            else { line.rho = 3.0f; line.theta = 0.78539816f; }
+
+            line.votes = 5;
+            BreezeDrawHoughLine(dst, 5, 5, &line, 255, 0);
+            pbytes(names[i], dst, 25);
+        }
+
+        /* A 4:2 slope, which is what it takes to reach Bresenham's decision
+         * boundary: the three cases above have dx or dy equal to zero, or dx equal
+         * to dy, and at all of those `e2` never lands exactly on `-dy`. Here it
+         * does, and `>` against `>=` then pick different pixels. */
+        memset(dst, 0xEE, sizeof dst);
+        line.rho = 2.0f;
+        line.theta = 1.10714872f;   /* atan(2) */
+        line.votes = 5;
+        BreezeDrawHoughLine(dst, 5, 5, &line, 255, 0);
+        pbytes("hough_draw_shallow", dst, 25);
+
+        /* Steeper still, and this is the one that reaches the boundary: `e2` only
+         * equals `-dy` once the error term has gone negative, which needs dy
+         * greater than dx. The 4:2 slope above does not get there - it was not
+         * enough to turn the `>` against `>=` probe red. This line enters through
+         * the left edge at x = 3.5 and leaves through the top at y = 0, so dx is 1
+         * and dy is 4. */
+        memset(dst, 0xEE, sizeof dst);
+        line.rho = 3.969f;
+        line.theta = 0.12435499f;   /* atan(1/8) */
+        line.votes = 5;
+        BreezeDrawHoughLine(dst, 5, 5, &line, 255, 0);
+        pbytes("hough_draw_steep", dst, 25);
+    }
+
+    /* A discrete circle of radius 2 in a 7x7 frame. The circle transform votes for
+     * *centres*: every edge pixel votes for the 72 positions a centre could be at,
+     * five degrees apart, so the true centre collects votes from every pixel of
+     * the ring - as many as the truncation in `(int)(x - r * cos)` lets through. */
+    {
+        const unsigned char ring[49] = {0, 0,   0,   0,   0,   0, 0,
+                                        0, 0,   255, 255, 255, 0, 0,
+                                        0, 255, 0,   0,   0,   255, 0,
+                                        0, 255, 0,   0,   0,   255, 0,
+                                        0, 255, 0,   0,   0,   255, 0,
+                                        0, 0,   255, 255, 255, 0, 0,
+                                        0, 0,   0,   0,   0,   0, 0};
+        BreezeHoughCircle circles[4];
+        int count, i;
+
+        for (i = 0; i < 4; i++) {
+            circles[i].x = -1;
+            circles[i].y = -1;
+            circles[i].radius = -1;
+            circles[i].votes = -1;
+        }
+        count = BreezeHoughCircles(ring, 7, 7, circles, 4, 1, 3, 3, 0);
+        pcircles("hough_circles_ring", circles, count);
+
+        /* Below every vote count: nothing is written. */
+        for (i = 0; i < 4; i++) {
+            circles[i].x = -1;
+            circles[i].y = -1;
+            circles[i].radius = -1;
+            circles[i].votes = -1;
+        }
+        count = BreezeHoughCircles(ring, 7, 7, circles, 4, 1, 3, 1000, 0);
+        pcircles("hough_circles_threshold_above_all", circles, count);
     }
 
     return 0;
