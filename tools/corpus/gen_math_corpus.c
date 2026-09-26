@@ -42,6 +42,7 @@
 #include "../../include/breeze/image/morphology.h"
 #include "../../include/breeze/image/canny_edge.h"
 #include "../../include/breeze/image/hough_transform.h"
+#include "../../include/breeze/image/histogram.h"
 #include "../../include/breeze/control/platform/balance_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
@@ -131,6 +132,28 @@ static void pcircles(const char* name, const BreezeHoughCircle* circles, int n) 
     for (i = 0; i < n; i++) {
         printf(" %d %d %d %d", circles[i].x, circles[i].y, circles[i].radius, circles[i].votes);
     }
+    putchar('\n');
+}
+
+/* A 256-bin histogram as its non-zero bins: `name pairs index count ...`. An
+ * image with a handful of distinct values makes that a short line, and it is an
+ * exact description - the port must produce zeros everywhere else. */
+static void phist(const char* name, const int* histogram) {
+    int i, n = 0;
+    for (i = 0; i < 256; i++) if (histogram[i] != 0) n++;
+    printf("%s %d", name, n);
+    for (i = 0; i < 256; i++) if (histogram[i] != 0) printf(" %d %d", i, histogram[i]);
+    putchar('\n');
+}
+
+/* The cumulative at the same bins, plus bin 255. The prefix-sum rule between two
+ * populated bins is pinned separately, with a histogram that has gaps. */
+static void pcumulative(const char* name, const int* cumulative, const int* histogram) {
+    int i, n = 0;
+    for (i = 0; i < 256; i++) if (histogram[i] != 0) n++;
+    printf("%s %d", name, n + 1);
+    for (i = 0; i < 256; i++) if (histogram[i] != 0) printf(" %d %d", i, cumulative[i]);
+    printf(" 255 %d", cumulative[255]);
     putchar('\n');
 }
 
@@ -2598,6 +2621,130 @@ int main(void) {
         }
         count = BreezeHoughCircles(ring, 7, 7, circles, 4, 1, 3, 1000, 0);
         pcircles("hough_circles_threshold_above_all", circles, count);
+    }
+
+    /* --- Histogram ---------------------------------------------------------- */
+    /* Four distinct values in a 4x4, so the histogram is four bins and the whole
+     * thing fits in a corpus line as index/count pairs. */
+    {
+        const unsigned char img[16] = {0, 0, 0, 77,
+                                       77, 77, 200, 200,
+                                       200, 255, 255, 255,
+                                       0, 77, 200, 255};
+        int histogram[256];
+        int cumulative[256];
+
+        BreezeHistogramCompute(img, 4, 4, histogram, 0);
+        phist("histogram_compute_small", histogram);
+
+        BreezeHistogramCumulative(histogram, cumulative);
+        pcumulative("histogram_cumulative_small", cumulative, histogram);
+
+        /* A stride wider than the image: the padding is not counted. */
+        {
+            unsigned char widesrc[24];
+            int y;
+            memset(widesrc, 0xAA, sizeof widesrc);
+            for (y = 0; y < 4; y++) memcpy(&widesrc[y * 6], &img[y * 4], 4);
+            BreezeHistogramCompute(widesrc, 4, 4, histogram, 6);
+            phist("histogram_compute_stride", histogram);
+        }
+
+        /* Gaps: bins 0, 5 and 255 only, so the cumulative is constant between
+         * them. The pair list alone would not show that; the two extra cases below
+         * do - one that reports the cumulative at a few empty bins, one that says
+         * whether the whole run was flat. */
+        {
+            int sparse[256];
+            int sparse_cumulative[256];
+            int i;
+            memset(sparse, 0, sizeof sparse);
+            sparse[0] = 3;
+            sparse[5] = 4;
+            sparse[255] = 1;
+            BreezeHistogramCumulative(sparse, sparse_cumulative);
+
+            printf("histogram_cumulative_sparse_bins 4 1 %d 4 %d 6 %d 254 %d",
+                   sparse_cumulative[1], sparse_cumulative[4],
+                   sparse_cumulative[6], sparse_cumulative[254]);
+            putchar('\n');
+
+            for (i = 1; i < 256; i++) {
+                int expected = (i >= 5) ? ((i >= 255) ? 8 : 7) : 3;
+                if (sparse_cumulative[i] != expected) {
+                    printf("histogram_cumulative_sparse_mismatch %d %d\n", i, sparse_cumulative[i]);
+                    break;
+                }
+            }
+            if (i == 256) printf("histogram_cumulative_sparse_flat 1\n");
+        }
+
+        /* Equalisation, and the degenerate case: a single-valued image has a
+         * cumulative of 0 below that value and everything at or above it, so the
+         * lookup table is 0 below and 255 from there up. */
+        {
+            unsigned char out[16];
+            const unsigned char flat[16] = {100, 100, 100, 100, 100, 100, 100, 100,
+                                            100, 100, 100, 100, 100, 100, 100, 100};
+
+            memset(out, 0xEE, sizeof out);
+            BreezeHistogramEqualization(img, out, 4, 4, 0);
+            pbytes("histogram_equalize_small", out, 16);
+
+            memset(out, 0xEE, sizeof out);
+            BreezeHistogramEqualization(flat, out, 4, 4, 0);
+            pbytes("histogram_equalize_uniform", out, 16);
+        }
+
+        /* CLAHE. Note the tile arithmetic: `tile_width = width / tile_count_x`, so
+         * a 5x5 with tile_size 2 gives three tiles of width 1 and columns 3 and 4
+         * are never *histogrammed* - though they are interpolated at the end. That
+         * is the module's own quirk and the uneven case records it.
+         *
+         * Every case here has at least two tiles along both axes on purpose: with
+         * one, the C reads `luts[-1]` and dies. See
+         * tools/corpus/probe_clahe_single_tile.c. */
+        {
+            unsigned char out[16];
+            unsigned char big[25];
+
+            memset(out, 0xEE, sizeof out);
+            BreezeHistogramEqualizationCLAHE(img, out, 4, 4, 2, 0.0f, 0);
+            pbytes("histogram_clahe_4x4_tile2", out, 16);
+
+            memset(out, 0xEE, sizeof out);
+            BreezeHistogramEqualizationCLAHE(img, out, 4, 4, 2, 1.5f, 0);
+            pbytes("histogram_clahe_4x4_tile2_clip", out, 16);
+
+            {
+                int i;
+                for (i = 0; i < 25; i++) big[i] = (unsigned char)((i * 37) % 256);
+            }
+            memset(out, 0xEE, sizeof out);
+            BreezeHistogramEqualizationCLAHE(big, out, 5, 5, 2, 0.0f, 0);
+            pbytes("histogram_clahe_5x5_tile2_uneven", out, 25);
+        }
+
+        /* The redistribution after clipping, which the case above cannot reach:
+         * there the tile is four pixels and `redistribution / 256` is zero, so the
+         * step does nothing at all. It needs a tile of more than 256 pixels *and* a
+         * concentrated histogram - 400 pixels spread over 256 bins leave almost
+         * nothing to redistribute, while the same 400 pixels in four bins leave 392.
+         * A 40x40 image with four values and a 20-pixel tile gives both, and eight
+         * bytes are enough to see it: the redistribution changes the lookup table
+         * for every bin, so every output pixel moves. */
+        {
+            unsigned char wide[1600];
+            unsigned char out8[8];
+            static const unsigned char levels[4] = {0, 64, 128, 192};
+            int i;
+
+            for (i = 0; i < 1600; i++) wide[i] = levels[i % 4];
+
+            memset(out8, 0xEE, sizeof out8);
+            BreezeHistogramEqualizationCLAHE(wide, out8, 40, 40, 20, 1.0f, 0);
+            pbytes("histogram_clahe_clip_redistribution", out8, 8);
+        }
     }
 
     return 0;

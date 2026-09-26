@@ -26,6 +26,7 @@ pub const gaussian = @import("gaussian.zig");
 pub const morphology = @import("morphology.zig");
 pub const canny = @import("canny.zig");
 pub const hough = @import("hough.zig");
+pub const histogram = @import("histogram.zig");
 
 pub const Error = common.Error;
 pub const threshold = binary.threshold;
@@ -55,6 +56,10 @@ pub const HoughCircle = hough.Circle;
 pub const houghLines = hough.houghLines;
 pub const drawHoughLine = hough.drawLine;
 pub const houghCircles = hough.houghCircles;
+pub const histogramCompute = histogram.compute;
+pub const histogramCumulative = histogram.cumulative;
+pub const histogramEqualize = histogram.equalize;
+pub const histogramEqualizeClahe = histogram.clahe;
 
 test {
     std.testing.refAllDecls(@This());
