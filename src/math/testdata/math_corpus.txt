@@ -245,3 +245,25 @@ lqr_max_iterations_stored 100
 lqr_convergence_tol_stored 9.99999975e-05
 lqr_compute -0.150000006
 lqr_compute_with_reference 0.850000024
+diffdrive_left_kp 1
+diffdrive_left_ki 0.100000001
+diffdrive_left_kd 0.0500000007
+diffdrive_left_output_min -1
+diffdrive_left_output_max 1
+diffdrive_right_kp 1
+diffdrive_dt 0.00999999978
+diffdrive_target_init 0
+diffdrive_target_linear 0.5
+diffdrive_target_angular 0.200000003
+diffdrive_clamped_linear 1
+diffdrive_clamped_angular -3
+diffdrive_encoder_to_speed 18.8495407
+diffdrive_update_left -0.159917295 -0.325559318 0.409605503
+diffdrive_update_right -0.221119612 0.119190499 -0.427496314
+diffdrive_left_motor_id 1
+diffdrive_right_motor_id 2
+diffdrive_encoder_reset_flag 1
+diffdrive_setparams_left_kp 2
+diffdrive_setparams_right_kd 0.25
+diffdrive_update_tuned_left -0.840870976 -1 1
+diffdrive_update_tuned_right -1 0.52121675 -1

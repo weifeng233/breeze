@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../../include/breeze/control/platform/differential_drive.h"
 #include "../../include/breeze/control/pid_controller.h"
 #include "../../include/breeze/control/state_feedback_controller.h"
 #include "../../include/breeze/filter/complementary_filter.h"
@@ -98,6 +99,39 @@ static void pbytes(const char* name, const unsigned char* bytes, int n) {
     printf("%s", name);
     for (i = 0; i < n; i++) printf(" %d", (int)bytes[i]);
     putchar('\n');
+}
+
+/* --- a fake mobile platform, for the differential drive cases --------------- */
+/* The C controllers reach the hardware through function pointers, so recording
+ * what they command means supplying our own. These live here rather than in the
+ * case list so the cases read as a scenario. */
+
+static float g_motor_speed[2];
+static int g_motor_id[2];
+static int g_motor_calls;
+static int g_encoder_step;
+static int g_encoder_reset;
+
+static void fake_set_motor(int motor_id, float speed) {
+    if (g_motor_calls < 2) {
+        g_motor_id[g_motor_calls] = motor_id;
+        g_motor_speed[g_motor_calls] = speed;
+    }
+    g_motor_calls++;
+}
+
+static float fake_get_encoder(int encoder_id, int reset) {
+    /* Counts chosen so the wheel speeds land near the target: one count is
+     * 2*pi*r/resolution/dt = 0.01885 m/s, so ~26 counts is ~0.5 m/s. Values that
+     * saturate the PID would only exercise the clamp. */
+    static const float left[3] = {25.0f, 28.0f, 24.0f};
+    static const float right[3] = {27.0f, 26.0f, 30.0f};
+    g_encoder_reset = reset;   /* recorded, because nothing else would check it */
+
+    float value = encoder_id == 1 ? left[g_encoder_step % 3] : right[g_encoder_step % 3];
+    /* The controller reads left then right; advance after the second. */
+    if (encoder_id != 1) g_encoder_step++;
+    return value;
 }
 
 /* A matrix prints its *used* region row-major, and the shape lives in the case
@@ -889,6 +923,83 @@ int main(void) {
     pf("lqr_compute", BreezeLQRController_Compute(&lqr, st2));
     BreezeLQRController_SetReference(&lqr, 2.0f);
     pf("lqr_compute_with_reference", BreezeLQRController_Compute(&lqr, st2));
+
+    /* --- differential drive, driven by the fake platform ------------------ */
+    BreezeDifferentialDrive dd;
+    const BreezeDifferentialDriveConfig dd_cfg = {
+        0.15f,   /* wheel_distance */
+        0.03f,   /* wheel_radius */
+        1.0f,    /* max_linear_speed */
+        3.0f,    /* max_angular_speed */
+        1,       /* left_motor_id */
+        2,       /* right_motor_id */
+        1,       /* left_encoder_id */
+        2,       /* right_encoder_id */
+        1000.0f  /* encoder_resolution */
+    };
+
+    BreezeDifferentialDrive_Init(&dd, dd_cfg, fake_set_motor, fake_get_encoder, 0.01f);
+
+    /* Init starts both wheel PIDs with fixed gains and a +-1 output range. */
+    pf("diffdrive_left_kp", dd.left_pid.kp);
+    pf("diffdrive_left_ki", dd.left_pid.ki);
+    pf("diffdrive_left_kd", dd.left_pid.kd);
+    pf("diffdrive_left_output_min", dd.left_pid.output_min);
+    pf("diffdrive_left_output_max", dd.left_pid.output_max);
+    pf("diffdrive_right_kp", dd.right_pid.kp);
+    pf("diffdrive_dt", dd.dt);
+    pf("diffdrive_target_init", dd.target_linear_speed);
+
+    BreezeDifferentialDrive_SetSpeed(&dd, 0.5f, 0.2f);
+    pf("diffdrive_target_linear", dd.target_linear_speed);
+    pf("diffdrive_target_angular", dd.target_angular_speed);
+
+    /* SetSpeed clamps each component against its own maximum. */
+    BreezeDifferentialDrive_SetSpeed(&dd, 5.0f, -9.0f);
+    pf("diffdrive_clamped_linear", dd.target_linear_speed);
+    pf("diffdrive_clamped_angular", dd.target_angular_speed);
+
+    /* One full wheel revolution in 10 ms: 2*pi*r / dt. */
+    pf("diffdrive_encoder_to_speed", BreezeDifferentialDrive_EncoderToSpeed(&dd, 1000.0f));
+
+    /* Three control passes with the gains `Init` chose: SetSpeed, then Update,
+     * reading a scripted encoder sequence and commanding the fake motors. */
+    BreezeDifferentialDrive_SetSpeed(&dd, 0.5f, 0.2f);
+    g_encoder_step = 0;
+    float left_cmd[3];
+    float right_cmd[3];
+    for (step_i = 0; step_i < 3; step_i++) {
+        g_motor_calls = 0;   /* reset per pass, or every pass records the first */
+        BreezeDifferentialDrive_Update(&dd);
+        left_cmd[step_i] = g_motor_speed[0];
+        right_cmd[step_i] = g_motor_speed[1];
+    }
+    pvals("diffdrive_update_left", left_cmd, 3);
+    pvals("diffdrive_update_right", right_cmd, 3);
+    pi("diffdrive_left_motor_id", g_motor_id[0]);
+    pi("diffdrive_right_motor_id", g_motor_id[1]);
+    pi("diffdrive_encoder_reset_flag", g_encoder_reset);
+
+    /* The same three passes with larger gains, on a *fresh* controller: a case
+     * has to be reproducible from its own setup, not from the one before it.
+     * (The first version of this reused `dd`, so the tuned run inherited the
+     * untuned run's PID history and no fresh controller could reproduce it.) */
+    BreezeDifferentialDrive ddt;
+    BreezeDifferentialDrive_Init(&ddt, dd_cfg, fake_set_motor, fake_get_encoder, 0.01f);
+    BreezeDifferentialDrive_SetPIDParams(&ddt, 2.0f, 0.5f, 0.25f);
+    pf("diffdrive_setparams_left_kp", ddt.left_pid.kp);
+    pf("diffdrive_setparams_right_kd", ddt.right_pid.kd);
+
+    BreezeDifferentialDrive_SetSpeed(&ddt, 0.5f, 0.2f);
+    g_encoder_step = 0;
+    for (step_i = 0; step_i < 3; step_i++) {
+        g_motor_calls = 0;
+        BreezeDifferentialDrive_Update(&ddt);
+        left_cmd[step_i] = g_motor_speed[0];
+        right_cmd[step_i] = g_motor_speed[1];
+    }
+    pvals("diffdrive_update_tuned_left", left_cmd, 3);
+    pvals("diffdrive_update_tuned_right", right_cmd, 3);
 
     return 0;
 }
