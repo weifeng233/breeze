@@ -21,12 +21,16 @@ const std = @import("std");
 pub const common = @import("common.zig");
 pub const binary = @import("binary.zig");
 pub const otsu = @import("otsu.zig");
+pub const sobel = @import("sobel.zig");
 
 pub const Error = common.Error;
 pub const threshold = binary.threshold;
 pub const inverseThreshold = binary.inverseThreshold;
 pub const otsuThreshold = otsu.otsu;
 pub const applyOtsu = otsu.applyOtsu;
+pub const sobelOperator = sobel.sobel;
+pub const sobelOperatorWithDirection = sobel.sobelWithDirection;
+pub const sobelOperatorThreshold = sobel.sobelThreshold;
 
 test {
     std.testing.refAllDecls(@This());

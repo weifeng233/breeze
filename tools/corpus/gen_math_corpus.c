@@ -37,6 +37,7 @@
 #include "../../include/breeze/control/fuzzy_controller.h"
 #include "../../include/breeze/image/binary_threshold.h"
 #include "../../include/breeze/image/otsu_threshold.h"
+#include "../../include/breeze/image/sobel_operator.h"
 #include "../../include/breeze/control/platform/balance_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
@@ -1713,6 +1714,127 @@ int main(void) {
     memset(imgdst, 0, sizeof imgdst);
     pi("apply_otsu_threshold", BreezeApplyOtsuThreshold(imgsrc, imgdst, 4, 3, 255, 0));
     pbytes("apply_otsu_result", imgdst, 12);
+
+    /* --- Sobel operator ----------------------------------------------------- */
+    /* A 4x4 image with a slanted bright corner, chosen so the 3x3 window's four
+     * interior positions produce four *different* answers: two of them clamp at
+     * 255, one has a gradient that is exactly axis-aligned (direction 128), and
+     * the rest land inside their byte rather than on a boundary - a direction
+     * that comes out at exactly N.0 would flip to N-1 on a one-ulp difference in
+     * `atan2f`, which is the one thing a byte dump of an angle cannot absorb. */
+    const unsigned char sob_varied[16] = {0, 0,   0,   0,
+                                          0, 10,  60,  0,
+                                          0, 120, 200, 0,
+                                          0, 0,   0,   0};
+
+    {
+        unsigned char mag[16];
+        unsigned char dir[16];
+
+        memset(mag, 0xEE, sizeof mag);
+        BreezeSobelOperator(sob_varied, mag, 4, 4, 0);
+        pbytes("sobel_magnitude", mag, 16);
+
+        memset(mag, 0xEE, sizeof mag);
+        memset(dir, 0xEE, sizeof dir);
+        BreezeSobelOperatorWithDirection(sob_varied, mag, dir, 4, 4, 0);
+        pbytes("sobel_direction_magnitude", mag, 16);
+        pbytes("sobel_direction", dir, 16);
+
+        /* The threshold is read back out of the magnitude image, so these cases
+         * ask for exactly the boundary: the C keeps `> threshold`, so a pixel
+         * whose magnitude equals it goes to 0. A `>=` would show up as different
+         * bytes in both. Two of them, because `mag[10]` (190) is the only
+         * interior magnitude that is not clamped - that one separates "at the
+         * boundary" from "at the clamp". */
+        memset(dir, 0xEE, sizeof dir);
+        BreezeSobelOperatorThreshold(sob_varied, dir, 4, 4, mag[10], 0);
+        pi("sobel_threshold_at_magnitude", mag[10]);
+        pbytes("sobel_threshold_at_magnitude_result", dir, 16);
+
+        memset(dir, 0xEE, sizeof dir);
+        BreezeSobelOperatorThreshold(sob_varied, dir, 4, 4, mag[9], 0);
+        pi("sobel_threshold_at_clamped", mag[9]);
+        pbytes("sobel_threshold_at_clamped_result", dir, 16);
+
+        memset(dir, 0xEE, sizeof dir);
+        BreezeSobelOperatorThreshold(sob_varied, dir, 4, 4, 0, 0);
+        pbytes("sobel_threshold_zero", dir, 16);
+    }
+
+    /* The direction at its seam. A leftward gradient (gx < 0, gy == 0) has angle
+     * +PI, so `(angle + PI) * 128 / PI` is exactly 256 - which does not fit in an
+     * unsigned char. The C casts it anyway: converting an out-of-range float is
+     * undefined behaviour, and on x86 it truncates to 0, the same byte as angle
+     * -PI. The port reproduces the byte that was measured and says so in a
+     * comment (docs/REVIEW.md §43); the rightward case beside it is 128. */
+    {
+        const unsigned char left_step[16] = {200, 200, 0, 0, 200, 200, 0, 0,
+                                             200, 200, 0, 0, 200, 200, 0, 0};
+        const unsigned char right_step[16] = {0, 0, 200, 200, 0, 0, 200, 200,
+                                              0, 0, 200, 200, 0, 0, 200, 200};
+        unsigned char mag[16];
+        unsigned char dir[16];
+
+        BreezeSobelOperatorWithDirection(left_step, mag, dir, 4, 4, 0);
+        pbytes("sobel_left_step_direction", dir, 16);
+        pbytes("sobel_left_step_magnitude", mag, 16);
+
+        BreezeSobelOperatorWithDirection(right_step, mag, dir, 4, 4, 0);
+        pbytes("sobel_right_step_direction", dir, 16);
+        pbytes("sobel_right_step_magnitude", mag, 16);
+    }
+
+    /* A uniform image has no gradient at all: `gx == 0 && gy == 0`, so the C
+     * never calls `atan2f` and the direction keeps its initial 0. */
+    {
+        const unsigned char flat[16] = {100, 100, 100, 100, 100, 100, 100, 100,
+                                        100, 100, 100, 100, 100, 100, 100, 100};
+        unsigned char mag[16];
+        unsigned char dir[16];
+
+        memset(mag, 0xEE, sizeof mag);
+        memset(dir, 0xEE, sizeof dir);
+        BreezeSobelOperatorWithDirection(flat, mag, dir, 4, 4, 0);
+        pbytes("sobel_uniform_magnitude", mag, 16);
+        pbytes("sobel_uniform_direction", dir, 16);
+    }
+
+    /* Smaller than the 3x3 window. The clear loop still runs over every pixel and
+     * the interior loop never executes, so the answer is zeros rather than the
+     * 0xEE the buffer was filled with. */
+    {
+        const unsigned char tiny[4] = {10, 20, 30, 40};
+        unsigned char mag[4];
+        unsigned char dir[4];
+
+        memset(mag, 0xEE, sizeof mag);
+        BreezeSobelOperator(tiny, mag, 2, 2, 0);
+        pbytes("sobel_small_magnitude", mag, 4);
+
+        memset(mag, 0xEE, sizeof mag);
+        memset(dir, 0xEE, sizeof dir);
+        BreezeSobelOperatorWithDirection(tiny, mag, dir, 2, 2, 0);
+        pbytes("sobel_small_direction_magnitude", mag, 4);
+        pbytes("sobel_small_direction", dir, 4);
+    }
+
+    /* A stride wider than the image: the padding is neither read nor written, so
+     * a buffer pre-filled with 0xEE shows exactly which bytes the function owns.
+     * The source is laid out at the same stride for the same reason as the
+     * threshold_stride case above. */
+    {
+        unsigned char widesrc[22];
+        unsigned char mag[24];
+        int y;
+
+        memset(widesrc, 0xAA, sizeof widesrc);
+        memset(mag, 0xEE, sizeof mag);
+        for (y = 0; y < 4; y++) memcpy(&widesrc[y * 6], &sob_varied[y * 4], 4);
+
+        BreezeSobelOperator(widesrc, mag, 4, 4, 6);
+        pbytes("sobel_stride_magnitude", mag, 24);
+    }
 
     return 0;
 }

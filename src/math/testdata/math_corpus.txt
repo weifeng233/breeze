@@ -445,3 +445,21 @@ apply_otsu_stride_read_threshold 10
 apply_otsu_stride_read_result 0 255 255 255 238 238 255 255 0 255 238 238
 apply_otsu_threshold 14
 apply_otsu_result 0 0 255 255 0 0 255 255 0 0 255 255
+sobel_magnitude 0 0 0 0 0 255 255 0 0 255 190 0 0 0 0 0
+sobel_direction_magnitude 0 0 0 0 0 255 255 0 0 255 190 0 0 0 0 0
+sobel_direction 0 0 0 0 0 166 202 0 0 120 19 0 0 0 0 0
+sobel_threshold_at_magnitude 190
+sobel_threshold_at_magnitude_result 0 0 0 0 0 255 255 0 0 255 0 0 0 0 0 0
+sobel_threshold_at_clamped 255
+sobel_threshold_at_clamped_result 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+sobel_threshold_zero 0 0 0 0 0 255 255 0 0 255 255 0 0 0 0 0
+sobel_left_step_direction 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+sobel_left_step_magnitude 0 0 0 0 0 255 255 0 0 255 255 0 0 0 0 0
+sobel_right_step_direction 0 0 0 0 0 128 128 0 0 128 128 0 0 0 0 0
+sobel_right_step_magnitude 0 0 0 0 0 255 255 0 0 255 255 0 0 0 0 0
+sobel_uniform_magnitude 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+sobel_uniform_direction 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+sobel_small_magnitude 0 0 0 0
+sobel_small_direction_magnitude 0 0 0 0
+sobel_small_direction 0 0 0 0
+sobel_stride_magnitude 0 0 0 0 238 238 0 255 255 0 238 238 0 255 190 0 238 238 0 0 0 0 238 238

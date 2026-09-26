@@ -23,9 +23,10 @@ const std = @import("std");
 /// The committed corpus, verbatim.
 pub const text = @embedFile("testdata/math_corpus.txt");
 
-/// The widest case in the file: a 4x4 matrix. Raising this is expected as
-/// modules are added - the parser says which case overflowed if it is not enough.
-pub const max_values = 16;
+/// The widest case in the file: a 4x4 image dumped with a 6-byte row stride, 24
+/// bytes. Raising this is expected as modules are added - the parser names the
+/// case that overflowed if it is not enough, so it is raised when it says so.
+pub const max_values = 32;
 
 /// The number of cases the file may hold, with room to grow: the image stage
 /// alone is six modules of filter kernels and transforms still to come. The
