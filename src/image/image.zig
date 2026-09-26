@@ -24,6 +24,7 @@ pub const otsu = @import("otsu.zig");
 pub const sobel = @import("sobel.zig");
 pub const gaussian = @import("gaussian.zig");
 pub const morphology = @import("morphology.zig");
+pub const canny = @import("canny.zig");
 
 pub const Error = common.Error;
 pub const threshold = binary.threshold;
@@ -44,6 +45,10 @@ pub const erode = morphology.erode;
 pub const open = morphology.open;
 pub const close = morphology.close;
 pub const gradient = morphology.gradient;
+pub const cannyGradient = canny.gradient;
+pub const cannyNonMaxSuppression = canny.nonMaxSuppression;
+pub const cannyHysteresis = canny.hysteresis;
+pub const cannyEdgeDetection = canny.edgeDetection;
 
 test {
     std.testing.refAllDecls(@This());

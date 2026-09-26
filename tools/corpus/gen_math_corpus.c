@@ -40,6 +40,7 @@
 #include "../../include/breeze/image/sobel_operator.h"
 #include "../../include/breeze/image/gaussian_blur.h"
 #include "../../include/breeze/image/morphology.h"
+#include "../../include/breeze/image/canny_edge.h"
 #include "../../include/breeze/control/platform/balance_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
@@ -2155,6 +2156,226 @@ int main(void) {
         memset(wideout, 0xEE, sizeof wideout);
         BreezeMorphologyErode(widesrc, wideout, 5, 5, k9, 3, 6);
         pbytes("morphology_erode_stride", wideout, 30);
+    }
+
+    /* --- Canny -------------------------------------------------------------- */
+    /* The direction quantiser, pinned where it turns over.
+     *
+     * `magnitude`, `direction`, `nms` and the hysteresis' `edges` are all indexed
+     * with `width`, not `stride`: the source is read strided, everything
+     * downstream is packed. Only the border of the gradient outputs is left
+     * untouched, so both are zeroed here to make the dumps reproducible.
+     *
+     * Each 3x3 image has exactly one interior pixel, so the whole answer is one
+     * gradient. The first four are the axis and diagonal cases; the rest come in
+     * pairs that differ in a single pixel of the neighbourhood and land either
+     * side of one of the quantiser's four thresholds. They exist because a probe
+     * that moved the 67.5 degree threshold to 70 stayed green: without an angle
+     * between them, nothing could tell the two apart. */
+    {
+        struct { const char* name; unsigned char px[9]; } cases[12] = {
+            {"canny_dir_east",  {0,   0,   0,   0, 0, 0,   0,   0,   100}},
+            {"canny_dir_45",    {0,   0,   0,   0, 0, 0,   0,   0,   100}},
+            {"canny_dir_south", {0,   0,   0,   0, 0, 0,   100, 100, 100}},
+            {"canny_dir_135",   {0,   0,   0,   0, 0, 0,   100, 0,   0}},
+            {"canny_dir_22_below", {0, 0, 29,  0, 0, 0,   0,   0,   69}},
+            {"canny_dir_22_above", {0, 0, 28,  0, 0, 0,   0,   0,   70}},
+            {"canny_dir_67_below", {0, 0, 0,   0, 0, 0,   41,  0,   100}},
+            {"canny_dir_67_above", {0, 0, 0,   0, 0, 0,   42,  0,   100}},
+            {"canny_dir_112_below", {0, 0, 0,  0, 0, 0,   100, 71,  0}},
+            {"canny_dir_112_above", {0, 0, 0,  0, 0, 0,   100, 70,  0}},
+            {"canny_dir_157_below", {0, 0, 0,  70, 0, 0,  100, 0,   0}},
+            {"canny_dir_157_above", {0, 0, 0,  71, 0, 0,  100, 0,   0}}
+        };
+        float magnitude[9];
+        unsigned char direction[9];
+        int c;
+
+        /* The east case needs its gradient along x, so make it the right column. */
+        cases[0].px[2] = 100;
+        cases[0].px[5] = 100;
+
+        for (c = 0; c < 12; c++) {
+            int i;
+            for (i = 0; i < 9; i++) magnitude[i] = 0.0f;
+            memset(direction, 0, sizeof direction);
+            BreezeCannyGradient(cases[c].px, magnitude, direction, 3, 3, 0);
+            pbytes(cases[c].name, direction, 9);
+            if (c == 0 || c == 2) {
+                char name[64];
+                snprintf(name, sizeof name, "%s_magnitude", cases[c].name);
+                pvals(name, magnitude, 9);
+            }
+        }
+    }
+
+    /* The border of the gradient outputs is not written at all: pre-filled
+     * buffers come back with their filling intact outside the interior. */
+    {
+        const unsigned char img[25] = {0,   0,   0,   0,   0,
+                                       0,   0,   0,   0,   0,
+                                       0,   0,   255, 255, 0,
+                                       0,   0,   255, 255, 0,
+                                       0,   0,   0,   0,   0};
+        float magnitude[25];
+        unsigned char direction[25];
+        int i;
+
+        for (i = 0; i < 25; i++) { magnitude[i] = 7.0f; direction[i] = 9; }
+        BreezeCannyGradient(img, magnitude, direction, 5, 5, 0);
+        pvals("canny_gradient_border_magnitude", magnitude, 25);
+        pbytes("canny_gradient_border_direction", direction, 25);
+    }
+
+    /* A stride wider than the image: the source is read strided and the outputs
+     * are written packed, so the padding is neither read nor written. */
+    {
+        const unsigned char img[25] = {0,   0,   0,   0,   0,
+                                       0,   0,   0,   0,   0,
+                                       0,   0,   255, 255, 0,
+                                       0,   0,   255, 255, 0,
+                                       0,   0,   0,   0,   0};
+        unsigned char widesrc[30];
+        float magnitude[25];
+        unsigned char direction[25];
+        int y;
+
+        memset(widesrc, 0xAA, sizeof widesrc);
+        for (y = 0; y < 5; y++) memcpy(&widesrc[y * 6], &img[y * 5], 5);
+        for (y = 0; y < 25; y++) magnitude[y] = 0.0f;
+        memset(direction, 0, sizeof direction);
+
+        BreezeCannyGradient(widesrc, magnitude, direction, 5, 5, 6);
+        pvals("canny_gradient_stride_magnitude", magnitude, 25);
+    }
+
+    /* Non-maximum suppression, on the gradients of the square image, and on an
+     * image with a plateau: two neighbours of equal magnitude along the gradient
+     * direction both survive, because the C compares with `>=`. */
+    {
+        const unsigned char img[25] = {0,   0,   0,   0,   0,
+                                       0,   0,   0,   0,   0,
+                                       0,   0,   255, 255, 0,
+                                       0,   0,   255, 255, 0,
+                                       0,   0,   0,   0,   0};
+        float magnitude[25];
+        unsigned char direction[25];
+        float nms[25];
+        int i;
+
+        for (i = 0; i < 25; i++) { magnitude[i] = 0.0f; direction[i] = 0; }
+        BreezeCannyGradient(img, magnitude, direction, 5, 5, 0);
+        BreezeCannyNonMaxSuppression(magnitude, direction, nms, 5, 5);
+        pvals("canny_nms", nms, 25);
+
+        /* A flat vertical edge five rows tall in a 3-wide image: every interior
+         * pixel has the same gradient, so every one of them has a neighbour of
+         * equal magnitude along its (vertical) gradient direction. */
+        {
+            const unsigned char flat[15] = {0,   0,   0,
+                                            0,   0,   0,
+                                            100, 100, 100,
+                                            100, 100, 100,
+                                            100, 100, 100};
+            float fmag[15];
+            unsigned char fdir[15];
+            float fnms[15];
+
+            for (i = 0; i < 15; i++) { fmag[i] = 0.0f; fdir[i] = 0; }
+            BreezeCannyGradient(flat, fmag, fdir, 3, 5, 0);
+            pbytes("canny_plateau_direction", fdir, 15);
+            BreezeCannyNonMaxSuppression(fmag, fdir, fnms, 3, 5);
+            pvals("canny_nms_plateau", fnms, 15);
+        }
+    }
+
+    /* The hysteresis pass, and the scan-order dependence it documents in its own
+     * comment. These magnitudes are written by hand: the point is the *pattern* of
+     * strong and weak pixels, not where it came from.
+     *
+     * A strong pixel promotes its weak neighbours, but only those the loop has not
+     * passed yet at the moment it looks - so a chain running with the scan order
+     * propagates all the way, and the same chain against it survives only to the
+     * first weak pixel. Both directions are recorded. */
+    {
+        float nms[25];
+        unsigned char edges[25];
+        int i;
+
+        /* Thresholds: 100 is strong, 50 is weak, 10 is neither. */
+        for (i = 0; i < 25; i++) nms[i] = 10.0f;
+        nms[12] = 100.0f;
+
+        memset(edges, 0xEE, sizeof edges);
+        BreezeCannyHysteresis(nms, edges, 5, 5, 50.0f, 100.0f);
+        pbytes("canny_hysteresis_thresholds", edges, 25);
+
+        /* A chain running left to right: strong, weak, weak. */
+        for (i = 0; i < 25; i++) nms[i] = 0.0f;
+        nms[2 * 5 + 1] = 100.0f;
+        nms[2 * 5 + 2] = 50.0f;
+        nms[2 * 5 + 3] = 50.0f;
+        memset(edges, 0xEE, sizeof edges);
+        BreezeCannyHysteresis(nms, edges, 5, 5, 50.0f, 100.0f);
+        pbytes("canny_hysteresis_chain_forward", edges, 25);
+
+        /* The same chain reversed: weak, weak, strong. */
+        for (i = 0; i < 25; i++) nms[i] = 0.0f;
+        nms[2 * 5 + 3] = 100.0f;
+        nms[2 * 5 + 2] = 50.0f;
+        nms[2 * 5 + 1] = 50.0f;
+        memset(edges, 0xEE, sizeof edges);
+        BreezeCannyHysteresis(nms, edges, 5, 5, 50.0f, 100.0f);
+        pbytes("canny_hysteresis_chain_backward", edges, 25);
+    }
+
+    /* The pipeline, staged by hand with defined intermediates.
+     *
+     * The C's own BreezeCannyEdgeDetection cannot be recorded: it mallocs
+     * `magnitude` and `direction`, the gradient writes only the interior, and the
+     * suppression stage reads border pixels from them whenever a diagonal
+     * direction at an interior pixel points at one. So its answer depends on heap
+     * garbage - a probe shows the same image producing 20 or 24 set pixels
+     * depending on what was in the heap, at exactly the four pixels whose
+     * suppression compares against a border value
+     * (tools/corpus/probe_canny_uninitialized.c).
+     *
+     * Zeroing the two buffers first is what makes this a function of its input.
+     * The port does the same internally, and that is the one place it deliberately
+     * does not reproduce the C. */
+    {
+        const unsigned char img[25] = {0,   0,   0,   0,   0,
+                                       0,   0,   0,   0,   0,
+                                       0,   0,   255, 255, 0,
+                                       0,   0,   255, 255, 0,
+                                       0,   0,   0,   0,   0};
+        unsigned char blurred[25];
+        float magnitude[25];
+        unsigned char direction[25];
+        float nms[25];
+        unsigned char dst[25];
+        float sigmas[2] = {1.0f, 0.5f};
+        const char* names[2] = {"canny_staged_edges", "canny_staged_edges_sigma_0p5"};
+        int s, i;
+
+        for (s = 0; s < 2; s++) {
+            BreezeGaussianBlur(img, blurred, 5, 5, sigmas[s], 0, 0);
+            for (i = 0; i < 25; i++) { magnitude[i] = 0.0f; direction[i] = 0; }
+            BreezeCannyGradient(blurred, magnitude, direction, 5, 5, 0);
+            BreezeCannyNonMaxSuppression(magnitude, direction, nms, 5, 5);
+            memset(dst, 0xEE, sizeof dst);
+            BreezeCannyHysteresis(nms, dst, 5, 5, 20.0f, 60.0f);
+            pbytes(names[s], dst, 25);
+        }
+
+        /* Thresholds above every magnitude: everything is 0 rather than the 0xEE
+         * the buffer held. This one *is* reproducible through the real pipeline,
+         * because with nothing above the low threshold no comparison can depend on
+         * the border - it is kept as the one case that exercises the C's own
+         * allocation path end to end. */
+        memset(dst, 0xEE, sizeof dst);
+        BreezeCannyEdgeDetection(img, dst, 5, 5, 1.0f, 1.0e9f, 1.0e9f, 0);
+        pbytes("canny_edges_5x5_all_below", dst, 25);
     }
 
     return 0;
