@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../../include/breeze/control/adaptive_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
 #include "../../include/breeze/control/platform/mecanum_drive.h"
@@ -1306,6 +1307,82 @@ int main(void) {
     }
     pvals("ackermann_run_drive", ak_drive, 3);
     pvals("ackermann_run_steering", ak_steer, 3);
+
+    /* --- MRAC ------------------------------------------------------------- */
+    BreezeMRAC mrac;
+    const float mrac_y[] = {0.0f, 0.1f, 0.25f, 0.5f, 0.8f};
+
+    BreezeMRAC_Init(&mrac, -1.0f, 2.0f, 0.5f, 0.75f, -10.0f, 10.0f, 0.01f);
+    pf("mrac_theta0_init", mrac.theta[0]);
+    pf("mrac_theta1_init", mrac.theta[1]);
+    pf("mrac_gamma0", mrac.gamma[0]);
+    pf("mrac_gamma1", mrac.gamma[1]);
+    pf("mrac_x_m_init", mrac.x_m);
+    pf("mrac_prev_x_init", mrac.prev_x);
+
+    for (step_i = 0; step_i < 5; step_i++) run[step_i] = BreezeMRAC_Update(&mrac, 1.0f, mrac_y[step_i]);
+    pvals("mrac_run", run, 5);
+    pf("mrac_theta0_after", mrac.theta[0]);
+    pf("mrac_theta1_after", mrac.theta[1]);
+    pf("mrac_x_m_after", mrac.x_m);
+
+    /* `prev_x` and `prev_u` are written on every update and read by nothing.
+     * They are state a caller can inspect, so they are recorded rather than
+     * dropped - unlike a configuration input nothing reads (REVIEW §33, §38). */
+    pf("mrac_prev_x_after", mrac.prev_x);
+    pf("mrac_prev_u_after", mrac.prev_u);
+
+    /* A large reference with a tight output limit: the control input clamps while
+     * the adaptation keeps running underneath. */
+    BreezeMRAC mrac_clamped;
+    BreezeMRAC_Init(&mrac_clamped, -1.0f, 2.0f, 100.0f, 100.0f, -0.5f, 0.5f, 0.01f);
+    for (step_i = 0; step_i < 5; step_i++) run[step_i] = BreezeMRAC_Update(&mrac_clamped, 10.0f, 0.0f);
+    pvals("mrac_clamped_run", run, 5);
+    pf("mrac_clamped_theta0_after", mrac_clamped.theta[0]);
+
+    /* --- self-tuning PID -------------------------------------------------- */
+    BreezeAdaptivePID apid;
+    BreezeAdaptivePID_Init(&apid, BREEZE_PID_POSITION, 2.0f, 0.5f, 0.1f, 0.01f, -5.0f, 5.0f,
+                           0.1f, 0.5f, 3);
+    pf("adaptive_kp_min", apid.kp_min);
+    pf("adaptive_kp_max", apid.kp_max);
+    pf("adaptive_ki_min", apid.ki_min);
+    pf("adaptive_kd_max", apid.kd_max);
+    pf("adaptive_period", (float)apid.adaptation_period);
+    pf("adaptive_pid_kp_init", apid.pid.kp);
+    pf("adaptive_prev_error_init", apid.prev_error);
+    pf("adaptive_prev_output_init", apid.prev_output);
+
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezeAdaptivePID_Compute(&apid, 3.0f, pmeas[step_i]);
+    pvals("adaptive_run", run, 6);
+    pf("adaptive_kp_after", apid.pid.kp);
+    pf("adaptive_ki_after", apid.pid.ki);
+    pf("adaptive_kd_after", apid.pid.kd);
+    pf("adaptive_prev_error_after", apid.prev_error);
+    pf("adaptive_prev_output_after", apid.prev_output);
+    pf("adaptive_counter_after", (float)apid.adaptation_counter);
+
+    /* A small error never adapts: the threshold gates the whole block. */
+    BreezeAdaptivePID apid_quiet;
+    BreezeAdaptivePID_Init(&apid_quiet, BREEZE_PID_POSITION, 2.0f, 0.5f, 0.1f, 0.01f, -5.0f, 5.0f,
+                           0.1f, 0.5f, 3);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezeAdaptivePID_Compute(&apid_quiet, 1.0f, 0.99f);
+    pvals("adaptive_quiet_run", run, 6);
+    pf("adaptive_quiet_kp_after", apid_quiet.pid.kp);
+    pf("adaptive_quiet_counter_after", (float)apid_quiet.adaptation_counter);
+
+    /* A large adaptation rate with a step error drives all three gains into
+     * their limits - the ordinary run moves them by a few thousandths and never
+     * gets near one. Without this case, deleting the gain clamp passed every
+     * test. */
+    BreezeAdaptivePID apid_fast;
+    BreezeAdaptivePID_Init(&apid_fast, BREEZE_PID_POSITION, 2.0f, 0.5f, 0.1f, 0.01f, -50.0f, 50.0f,
+                           50.0f, 0.1f, 1);
+    for (step_i = 0; step_i < 4; step_i++) run[step_i] = BreezeAdaptivePID_Compute(&apid_fast, 10.0f, 0.0f);
+    pvals("adaptive_fast_run", run, 4);
+    pf("adaptive_fast_kp_after", apid_fast.pid.kp);
+    pf("adaptive_fast_ki_after", apid_fast.pid.ki);
+    pf("adaptive_fast_kd_after", apid_fast.pid.kd);
 
     return 0;
 }

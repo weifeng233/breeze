@@ -338,3 +338,39 @@ ackermann_drive_motor_id 1
 ackermann_steering_motor_id 2
 ackermann_run_drive -0.627502322 -0.410729319 0.324350506
 ackermann_run_steering 0.600000024 0.600000024 0.600000024
+mrac_theta0_init 0
+mrac_theta1_init 0
+mrac_gamma0 0.5
+mrac_gamma1 0.75
+mrac_x_m_init 0
+mrac_prev_x_init 0
+mrac_run 9.99999975e-05 -0.000205514982 -0.00125462026 -0.00425094552 -0.0117249489
+mrac_theta0_after -0.00676985085
+mrac_theta1_after -0.00619387208
+mrac_x_m_after 0.0980198979
+mrac_prev_x_after 0.5
+mrac_prev_u_after -0.0117249489
+mrac_clamped_run 0.5 0.5 0.5 0.5 0.5
+mrac_clamped_theta0_after 29.6029835
+adaptive_kp_min 0.200000003
+adaptive_kp_max 10
+adaptive_ki_min 0.0500000007
+adaptive_kd_max 0.5
+adaptive_period 3
+adaptive_pid_kp_init 2
+adaptive_prev_error_init 0
+adaptive_prev_output_init 0
+adaptive_run 5 0.0275001526 -3.36350107 5 1.6475656 5
+adaptive_kp_after 2.00500011
+adaptive_ki_after 0.50999999
+adaptive_kd_after 0.104999997
+adaptive_prev_error_after 2
+adaptive_prev_output_after 5
+adaptive_counter_after 0
+adaptive_quiet_run -0.879950225 0.0200999808 0.0201499816 0.0201999806 0.0202499814 0.0202999804
+adaptive_quiet_kp_after 2
+adaptive_quiet_counter_after 0
+adaptive_fast_run 50 2.00999999 2.75 3
+adaptive_fast_kp_after 0.200000003
+adaptive_fast_ki_after 2.5
+adaptive_fast_kd_after 0.0100000007
