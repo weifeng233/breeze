@@ -463,3 +463,24 @@ sobel_small_magnitude 0 0 0 0
 sobel_small_direction_magnitude 0 0 0 0
 sobel_small_direction 0 0 0 0
 sobel_stride_magnitude 0 0 0 0 238 238 0 255 255 0 238 238 0 255 190 0 238 238 0 0 0 0 238 238
+gaussian_kernel_3_sigma_1 0.274068624 0.451862752 0.274068624
+gaussian_kernel_5_sigma_1 0.0544886887 0.244201362 0.402619958 0.244201362 0.0544886887
+gaussian_kernel_5_sigma_2 0.152469143 0.221841305 0.251379132 0.221841305 0.152469143
+gaussian_kernel_ok 1
+gaussian_kernel_even_refused 0
+gaussian_kernel_zero_size_refused 0
+gaussian_kernel_negative_sigma_refused 0
+gaussian_kernel_sigma_zero_refused 0
+gaussian_horizontal_3 0 0 0 0 0 0 0 0 0 55 90 55 0 0 0 0
+gaussian_vertical_3 0 0 0 0 0 15 25 15 0 25 41 25 0 15 25 15
+gaussian_blur_auto_sigma_1 1 3 4 3 3 12 19 12 4 19 32 19 3 12 19 12
+gaussian_blur_explicit_7 1 3 4 3 3 12 19 12 4 19 32 19 3 12 19 12
+gaussian_blur_even_6_becomes_7 1 3 4 3 3 12 19 12 4 19 32 19 3 12 19 12
+gaussian_blur_auto_narrow_sigma_0p2 0 0 0 0 0 0 0 0 0 0 200 0 0 0 0 0
+gaussian_blur_explicit_3_sigma_0p2 0 0 0 0 0 0 0 0 0 0 200 0 0 0 0 0
+gaussian_blur_kernel_1_identity 0 0 0 0 0 0 0 0 0 0 200 0 0 0 0 0
+gaussian_blur_sigma_zero_untouched 238 238 238 238 238 238 238 238 238 238 238 238 238 238 238 238
+gaussian_rounding_half 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+gaussian_blur_saturated 255 255 255 255 255 255 255 255 255 255 255 255 255 255 255 255
+gaussian_rounding_over_255 255 255 255 255 255 255 255 255 255 255 255 255 255 255 255 255
+gaussian_blur_stride 0 0 0 0 238 238 0 15 25 15 238 238 0 25 41 25 238 238 0 15 25 15 238 238

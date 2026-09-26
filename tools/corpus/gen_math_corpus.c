@@ -38,6 +38,7 @@
 #include "../../include/breeze/image/binary_threshold.h"
 #include "../../include/breeze/image/otsu_threshold.h"
 #include "../../include/breeze/image/sobel_operator.h"
+#include "../../include/breeze/image/gaussian_blur.h"
 #include "../../include/breeze/control/platform/balance_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
@@ -1834,6 +1835,164 @@ int main(void) {
 
         BreezeSobelOperator(widesrc, mag, 4, 4, 6);
         pbytes("sobel_stride_magnitude", mag, 24);
+    }
+
+    /* --- Gaussian blur ------------------------------------------------------ */
+    /* The kernel itself. A one-pixel-wide bright dot is what makes a blur's
+     * weights legible: every output pixel of a delta image is a kernel weight
+     * (times 200), so the byte dumps below are the kernel in disguise. */
+    const unsigned char dot[16] = {0, 0, 0,   0,
+                                   0, 0, 0,   0,
+                                   0, 0, 200, 0,
+                                   0, 0, 0,   0};
+
+    {
+        float k3[3];
+        float k5[5];
+
+        BreezeGaussianKernel1D(k3, 3, 1.0f);
+        pvals("gaussian_kernel_3_sigma_1", k3, 3);
+
+        BreezeGaussianKernel1D(k5, 5, 1.0f);
+        pvals("gaussian_kernel_5_sigma_1", k5, 5);
+
+        BreezeGaussianKernel1D(k5, 5, 2.0f);
+        pvals("gaussian_kernel_5_sigma_2", k5, 5);
+
+        /* Every refusal the C can express, plus the success code. The port splits
+         * these three ways: an even (or zero) size is a compile error there, a
+         * non-positive sigma is an error value, and the success code disappears
+         * because a function that returns nothing else has nothing to return. */
+        pi("gaussian_kernel_ok", BreezeGaussianKernel1D(k5, 5, 1.0f));
+        pi("gaussian_kernel_even_refused", BreezeGaussianKernel1D(k5, 4, 1.0f));
+        pi("gaussian_kernel_zero_size_refused", BreezeGaussianKernel1D(k5, 0, 1.0f));
+        pi("gaussian_kernel_negative_sigma_refused", BreezeGaussianKernel1D(k5, 3, -1.0f));
+        pi("gaussian_kernel_sigma_zero_refused", BreezeGaussianKernel1D(k5, 3, 0.0f));
+    }
+
+    {
+        float k3[3];
+        unsigned char temp[16];
+        unsigned char out[16];
+
+        BreezeGaussianKernel1D(k3, 3, 1.0f);
+
+        memset(temp, 0xEE, sizeof temp);
+        BreezeGaussianBlur1D_Horizontal(dot, temp, 4, 4, k3, 3, 0);
+        pbytes("gaussian_horizontal_3", temp, 16);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur1D_Vertical(temp, out, 4, 4, k3, 3, 0);
+        pbytes("gaussian_vertical_3", out, 16);
+    }
+
+    /* The auto-sized kernel is pinned through behaviour rather than through the
+     * arithmetic: the C's rule runs inside BreezeGaussianBlur, so the only way to
+     * see it is to blur twice - once with kernel_size 0 and once with the size
+     * the rule is supposed to produce - and require the same bytes.
+     *
+     * sigma * 6 + 0.5 is 6.5 for sigma 1, which truncates to the even 6 and is
+     * bumped to 7. That branch is visible in the bytes.
+     *
+     * The `< 3` floor is *not*, and that is a measured fact rather than a hope:
+     * the floor only fires for sigma < 0.25, where the side taps are at most
+     * exp(-1 / (2 * 0.24^2)) = 1.7e-4, so no 8-bit output can show them. Running
+     * every floor-branch sigma against every pixel value on a constant image -
+     * the arrangement that maximises what a side tap can change - gives 0
+     * differing bytes (tools/corpus/probe_gaussian.c). The narrow-sigma cases
+     * below therefore record "a narrow kernel is the identity", not "the floor is
+     * 3", and the floor itself is pinned by nothing. */
+    {
+        unsigned char out[16];
+
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur(dot, out, 4, 4, 1.0f, 0, 0);
+        pbytes("gaussian_blur_auto_sigma_1", out, 16);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur(dot, out, 4, 4, 1.0f, 7, 0);
+        pbytes("gaussian_blur_explicit_7", out, 16);
+
+        /* An even kernel_size is bumped rather than refused. */
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur(dot, out, 4, 4, 1.0f, 6, 0);
+        pbytes("gaussian_blur_even_6_becomes_7", out, 16);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur(dot, out, 4, 4, 0.2f, 0, 0);
+        pbytes("gaussian_blur_auto_narrow_sigma_0p2", out, 16);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur(dot, out, 4, 4, 0.2f, 3, 0);
+        pbytes("gaussian_blur_explicit_3_sigma_0p2", out, 16);
+
+        /* A one-tap kernel is the identity, which is worth a case because it is
+         * the only size where the blur must not change a single byte. */
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur(dot, out, 4, 4, 1.0f, 1, 0);
+        pbytes("gaussian_blur_kernel_1_identity", out, 16);
+
+        /* sigma is not allowed to be non-positive here either. */
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur(dot, out, 4, 4, 0.0f, 3, 0);
+        pbytes("gaussian_blur_sigma_zero_untouched", out, 16);
+    }
+
+    /* The rounding rule, pinned with a kernel the Gaussian constructor would
+     * never produce: `[0, 0.5, 0.5]` makes the horizontal sum land on exactly
+     * 0.5, where `(int)(sum + 0.5)` gives 1 and a truncating port would give 0.
+     * The 1-D functions take any kernel, so this is a legitimate input. */
+    {
+        const unsigned char checker[16] = {0, 1, 0, 1,
+                                           0, 1, 0, 1,
+                                           0, 1, 0, 1,
+                                           0, 1, 0, 1};
+        float half_kernel[3] = {0.0f, 0.5f, 0.5f};
+        unsigned char out[16];
+
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur1D_Horizontal(checker, out, 4, 4, half_kernel, 3, 0);
+        pbytes("gaussian_rounding_half", out, 16);
+    }
+
+    /* The upper clamp, which the delta image can never reach: its brightest pixel
+     * is 200 and every output is a weighted average of its neighbours. A mutation
+     * probe that moved the saturation from 255 to 253 stayed green against every
+     * other case here, so these two exist to reach it.
+     *
+     * A saturated image with a real kernel sums to exactly 255; `[1, 1, 1]` is not
+     * normalized at all and sums to 765, which is what makes the clamp itself -
+     * and not merely its position - load-bearing. */
+    {
+        unsigned char bright[16];
+        unsigned char out[16];
+        float unit_kernel[3] = {1.0f, 1.0f, 1.0f};
+
+        memset(bright, 255, sizeof bright);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur(bright, out, 4, 4, 1.0f, 7, 0);
+        pbytes("gaussian_blur_saturated", out, 16);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeGaussianBlur1D_Horizontal(bright, out, 4, 4, unit_kernel, 3, 0);
+        pbytes("gaussian_rounding_over_255", out, 16);
+    }
+
+    /* A stride wider than the image: the padding is neither read nor written,
+     * and the temporary buffer is `stride * height` bytes exactly as the C
+     * allocates it. */
+    {
+        unsigned char widesrc[22];
+        unsigned char wideout[24];
+        int y;
+
+        memset(widesrc, 0xAA, sizeof widesrc);
+        memset(wideout, 0xEE, sizeof wideout);
+        for (y = 0; y < 4; y++) memcpy(&widesrc[y * 6], &dot[y * 4], 4);
+
+        BreezeGaussianBlur(widesrc, wideout, 4, 4, 1.0f, 3, 6);
+        pbytes("gaussian_blur_stride", wideout, 24);
     }
 
     return 0;
