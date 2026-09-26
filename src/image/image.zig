@@ -23,6 +23,7 @@ pub const binary = @import("binary.zig");
 pub const otsu = @import("otsu.zig");
 pub const sobel = @import("sobel.zig");
 pub const gaussian = @import("gaussian.zig");
+pub const morphology = @import("morphology.zig");
 
 pub const Error = common.Error;
 pub const threshold = binary.threshold;
@@ -36,6 +37,13 @@ pub const gaussianKernel = gaussian.gaussianKernel;
 pub const gaussianBlur = gaussian.blur;
 pub const gaussianBlurSized = gaussian.blurSized;
 pub const autoGaussianKernelSize = gaussian.autoKernelSize;
+pub const Shape = morphology.Shape;
+pub const createStructureElement = morphology.createKernel;
+pub const dilate = morphology.dilate;
+pub const erode = morphology.erode;
+pub const open = morphology.open;
+pub const close = morphology.close;
+pub const gradient = morphology.gradient;
 
 test {
     std.testing.refAllDecls(@This());

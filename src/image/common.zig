@@ -34,6 +34,18 @@ pub fn checkRegion(len: usize, width: usize, height: usize, stride: usize) Error
     if (regionLen(width, height, stride) > len) return Error.BufferTooSmall;
 }
 
+/// The stricter check the morphology functions need.
+///
+/// They clear their destination with `memset(dst, 0, stride * height)` - the whole
+/// buffer, padding included - which is the one place in this stage where the
+/// padding is deliberately written. A buffer that fits the image region but not
+/// the final row's padding is therefore still too small, and the corpus records
+/// the zeros that appear in those bytes.
+pub fn checkFullBuffer(len: usize, width: usize, height: usize, stride: usize) Error!void {
+    if (width == 0 or height == 0) return Error.InvalidSize;
+    if (stride * height > len) return Error.BufferTooSmall;
+}
+
 test "region arithmetic" {
     try std.testing.expectEqual(@as(usize, 4), strideOf(4, 0));
     try std.testing.expectEqual(@as(usize, 5), strideOf(4, 5));
@@ -49,4 +61,20 @@ test "region arithmetic" {
 
     const exact: [12]u8 = undefined;
     try checkRegion(exact.len, 4, 3, 4);
+}
+
+test "the full-buffer check is stricter than the region check" {
+    // 4 wide at stride 5, 3 rows: the region ends at 2 * 5 + 4 = 14, but the
+    // buffer a morphology function writes is 5 * 3 = 15 bytes. A 14-byte buffer
+    // passes the region check and must fail this one.
+    const fourteen: [14]u8 = undefined;
+    try checkRegion(fourteen.len, 4, 3, 5);
+    try std.testing.expectError(Error.BufferTooSmall, checkFullBuffer(fourteen.len, 4, 3, 5));
+
+    const fifteen: [15]u8 = undefined;
+    try checkFullBuffer(fifteen.len, 4, 3, 5);
+
+    // With no padding the two agree.
+    try checkFullBuffer(fifteen.len - 3, 4, 3, 4);
+    try std.testing.expectError(Error.InvalidSize, checkFullBuffer(fifteen.len, 0, 3, 5));
 }

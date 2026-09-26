@@ -39,6 +39,7 @@
 #include "../../include/breeze/image/otsu_threshold.h"
 #include "../../include/breeze/image/sobel_operator.h"
 #include "../../include/breeze/image/gaussian_blur.h"
+#include "../../include/breeze/image/morphology.h"
 #include "../../include/breeze/control/platform/balance_controller.h"
 #include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
@@ -1993,6 +1994,167 @@ int main(void) {
 
         BreezeGaussianBlur(widesrc, wideout, 4, 4, 1.0f, 3, 6);
         pbytes("gaussian_blur_stride", wideout, 24);
+    }
+
+    /* --- Morphology --------------------------------------------------------- */
+    /* The structure elements. Shapes are 0=rectangle, 1=cross, 2=circle, and any
+     * other value falls through to the rectangle default - recorded, because the
+     * port replaces that `int` with an enum and the default branch disappears
+     * with it.
+     *
+     * For size 3 the circle and the cross come out identical (every cell within
+     * distance 1 of the centre is exactly the plus), which is worth seeing in the
+     * fixture rather than assuming: size 5 is where they part ways. */
+    {
+        unsigned char k9[9];
+        unsigned char k25[25];
+        unsigned char untouched[16];
+        int shape;
+
+        for (shape = 0; shape < 3; shape++) {
+            const char* names[3] = {"rect", "cross", "circle"};
+            BreezeMorphologyCreateKernel(k9, 3, shape);
+            printf("morphology_kernel_%s_3", names[shape]);
+            {
+                int i;
+                for (i = 0; i < 9; i++) printf(" %d", (int)k9[i]);
+                putchar('\n');
+            }
+            BreezeMorphologyCreateKernel(k25, 5, shape);
+            printf("morphology_kernel_%s_5", names[shape]);
+            {
+                int i;
+                for (i = 0; i < 25; i++) printf(" %d", (int)k25[i]);
+                putchar('\n');
+            }
+        }
+
+        BreezeMorphologyCreateKernel(k9, 3, 7);
+        pbytes("morphology_kernel_unknown_shape_3_is_rect", k9, 9);
+
+        /* Refusals leave the caller's buffer alone: the C returns before it
+         * clears anything. These two are compile errors in the port, so the
+         * fixture is the only place the C's behaviour is written down. */
+        memset(untouched, 0xEE, sizeof untouched);
+        BreezeMorphologyCreateKernel(untouched, 4, 0);
+        pbytes("morphology_kernel_even_size_untouched", untouched, 16);
+
+        memset(untouched, 0xEE, sizeof untouched);
+        BreezeMorphologyCreateKernel(untouched, 0, 0);
+        pbytes("morphology_kernel_zero_size_untouched", untouched, 16);
+    }
+
+    /* A 5x5 image with a solid 3x3 block, which is the smallest arrangement where
+     * erosion keeps anything at all (it needs the whole element inside the block)
+     * and where dilation grows it to the frame. */
+    {
+        const unsigned char block[25] = {0,   0,   0,   0,   0,
+                                         0,   255, 255, 255, 0,
+                                         0,   255, 255, 255, 0,
+                                         0,   255, 255, 255, 0,
+                                         0,   0,   0,   0,   0};
+        unsigned char k9[9];
+        unsigned char k25[25];
+        unsigned char out[25];
+        unsigned char temp[25];
+
+        BreezeMorphologyCreateKernel(k9, 3, 0);
+        BreezeMorphologyCreateKernel(k25, 5, 2);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeMorphologyDilate(block, out, 5, 5, k9, 3, 0);
+        pbytes("morphology_dilate_rect_3", out, 25);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeMorphologyErode(block, out, 5, 5, k9, 3, 0);
+        pbytes("morphology_erode_rect_3", out, 25);
+
+        BreezeMorphologyCreateKernel(k9, 3, 1);
+        memset(out, 0xEE, sizeof out);
+        BreezeMorphologyDilate(block, out, 5, 5, k9, 3, 0);
+        pbytes("morphology_dilate_cross_3", out, 25);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeMorphologyErode(block, out, 5, 5, k9, 3, 0);
+        pbytes("morphology_erode_cross_3", out, 25);
+
+        /* The size-5 circle: the shape that is not the cross. */
+        memset(out, 0xEE, sizeof out);
+        BreezeMorphologyDilate(block, out, 5, 5, k25, 5, 0);
+        pbytes("morphology_dilate_circle_5", out, 25);
+
+        BreezeMorphologyCreateKernel(k9, 3, 0);
+        memset(out, 0xEE, sizeof out);
+        memset(temp, 0xEE, sizeof temp);
+        BreezeMorphologyOpen(block, out, 5, 5, k9, 3, 0);
+        pbytes("morphology_open_rect_3", out, 25);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeMorphologyClose(block, out, 5, 5, k9, 3, 0);
+        pbytes("morphology_close_rect_3", out, 25);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeMorphologyGradient(block, out, 5, 5, k9, 3, 0);
+        pbytes("morphology_gradient_rect_3", out, 25);
+    }
+
+    /* A shape too thin to survive erosion, which is the only kind of image where
+     * opening and closing differ. The solid 3x3 block above happens to answer the
+     * same both ways - the fixture shows the two byte dumps identical - so a probe
+     * that swapped `open` for `close` stayed green until this pair existed.
+     *
+     * A 2x2 block: erosion needs the whole 3x3 element inside it and finds
+     * nothing, so opening erases the block entirely; closing first grows it to
+     * 4x4 and then erodes, which leaves a 2x2. */
+    {
+        const unsigned char thin[25] = {0, 0,   0,   0, 0,
+                                        0, 255, 255, 0, 0,
+                                        0, 255, 255, 0, 0,
+                                        0, 0,   0,   0, 0,
+                                        0, 0,   0,   0, 0};
+        unsigned char k9[9];
+        unsigned char out[25];
+
+        BreezeMorphologyCreateKernel(k9, 3, 0);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeMorphologyOpen(thin, out, 5, 5, k9, 3, 0);
+        pbytes("morphology_open_thin_rect_3", out, 25);
+
+        memset(out, 0xEE, sizeof out);
+        BreezeMorphologyClose(thin, out, 5, 5, k9, 3, 0);
+        pbytes("morphology_close_thin_rect_3", out, 25);
+    }
+
+    /* A stride wider than the image, and here the padding matters: dilate and
+     * erode clear `stride * height` bytes, so the trailing bytes are written -
+     * unlike every other function in this file, which touches only the image
+     * region. A destination pre-filled with 0xEE comes back with zeros in the
+     * padding. The source is laid out at the same stride, and its 0xAA padding is
+     * never read (a value of 170 is not 0, so reading it would dilate from it). */
+    {
+        const unsigned char block[25] = {0,   0,   0,   0,   0,
+                                         0,   255, 255, 255, 0,
+                                         0,   255, 255, 255, 0,
+                                         0,   255, 255, 255, 0,
+                                         0,   0,   0,   0,   0};
+        unsigned char widesrc[30];
+        unsigned char wideout[30];
+        unsigned char k9[9];
+        int y;
+
+        BreezeMorphologyCreateKernel(k9, 3, 0);
+
+        memset(widesrc, 0xAA, sizeof widesrc);
+        memset(wideout, 0xEE, sizeof wideout);
+        for (y = 0; y < 5; y++) memcpy(&widesrc[y * 6], &block[y * 5], 5);
+
+        BreezeMorphologyDilate(widesrc, wideout, 5, 5, k9, 3, 6);
+        pbytes("morphology_dilate_stride", wideout, 30);
+
+        memset(wideout, 0xEE, sizeof wideout);
+        BreezeMorphologyErode(widesrc, wideout, 5, 5, k9, 3, 6);
+        pbytes("morphology_erode_stride", wideout, 30);
     }
 
     return 0;

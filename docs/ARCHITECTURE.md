@@ -317,7 +317,7 @@ C 于是采用隐式声明——隐式 `malloc` 的返回类型是 `int`，在 6
 | math | 4 | 1431 | 34 | ✅ **已完成**（vector / matrix / quaternion / interpolation） |
 | filter | 5 | 822 | 2 | ✅ **已完成**（low_pass / high_pass / complementary / kalman / median） |
 | control | 10 | 2375 | 4 | ✅ **已完成**（pid / state_feedback / 自适应 / fuzzy / `platform` 六个，§34–§41） |
-| image | 8 | 1878 | 72 | **进行中**（binary_threshold / otsu_threshold / sobel_operator / gaussian_blur 已完成；临时缓冲一律改成调用者提供的切片，内核尺寸在 `blur` 里是 comptime。余下 4 个，见 §42–§44） |
+| image | 8 | 1878 | 72 | **进行中**（binary_threshold / otsu_threshold / sobel_operator / gaussian_blur / morphology 已完成；临时缓冲改成调用者切片，尺寸类参数（内核、结构元素）在 Zig 侧是 comptime。余下 3 个，见 §42–§45） |
 
 整套 C 层全绿：35 个头文件逐个独立编译、14 个 TU 编译、5 个示例与 2 个应用
 链接并运行、11 个通信测试（42 条断言）通过，全部在 `-Wall -Wextra -Werror` 下。
