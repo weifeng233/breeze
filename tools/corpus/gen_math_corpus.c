@@ -21,14 +21,16 @@
  * fixture loses nothing, so a mismatch is a real difference and not a printing
  * artefact.
  *
- * Cases are added module by module as the migration proceeds. vector and matrix
- * are done; quaternion and interpolation follow.
+ * Cases are added module by module as the migration proceeds. vector, matrix and
+ * quaternion are done; interpolation follows.
  */
 
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 
 #include "../../include/breeze/math/matrix.h"
+#include "../../include/breeze/math/quaternion.h"
 #include "../../include/breeze/math/vector.h"
 
 /* One printer per arity keeps `main` a readable list of cases. */
@@ -51,6 +53,15 @@ static void pf(const char* name, float v) {
 
 static void pi(const char* name, int v) {
     printf("%s %d\n", name, v);
+}
+
+static void pq(const char* name, const BreezeQuaternion* q) {
+    printf("%s %.9g %.9g %.9g %.9g\n", name,
+           (double)q->w, (double)q->x, (double)q->y, (double)q->z);
+}
+
+static void p3f(const char* name, float a, float b, float c) {
+    printf("%s %.9g %.9g %.9g\n", name, (double)a, (double)b, (double)c);
 }
 
 /* A matrix prints its *used* region row-major, and the shape lives in the case
@@ -317,6 +328,127 @@ int main(void) {
     setm(&mr, 2, 2, b2v);
     pi("matrix_inverse_singular_ok", BreezeMatrix_Inverse2x2(&mr, &msing));
     pm("matrix_inverse_singular_untouched", &mr);
+
+    /* --- quaternion ------------------------------------------------------ */
+    BreezeQuaternion qa, qb, qr;
+    float qr_roll, qr_pitch, qr_yaw;
+
+    printf("quat_layout %zu %zu\n", sizeof qa, _Alignof(BreezeQuaternion));
+
+    BreezeQuaternion_SetIdentity(&qa);
+    pq("quat_identity", &qa);
+
+    BreezeQuaternion_Init(&qa, 1.5f, -2.5f, 3.25f, -4.75f);
+    pq("quat_init", &qa);
+
+    /* Trigonometry enters here, so these are the cases where a libm difference
+     * between the two implementations could show up as a last-bit disagreement.
+     * The comparison tolerance exists for them. */
+    BreezeQuaternion_FromEulerZYX(&qa, 0.3f, -0.4f, 1.1f);
+    pq("quat_from_euler_zyx", &qa);
+
+    BreezeQuaternion_FromEulerZYX(&qa, 0.0f, 0.0f, 0.0f);
+    pq("quat_from_euler_zyx_zero", &qa);
+
+    BreezeQuaternion_FromEulerZYX(&qa, 0.3f, -0.4f, 1.1f);
+    BreezeQuaternion_ToEulerZYX(&qa, &qr_roll, &qr_pitch, &qr_yaw);
+    p3f("quat_euler_roundtrip", qr_roll, qr_pitch, qr_yaw);
+
+    /* pitch = +pi/2 is the gimbal-lock branch, where the C code sets roll to 0
+     * by convention and takes yaw from a different formula. */
+    BreezeQuaternion_FromEulerZYX(&qa, 0.3f, (float)(M_PI / 2.0), 1.1f);
+    pq("quat_from_euler_zyx_gimbal", &qa);
+    BreezeQuaternion_ToEulerZYX(&qa, &qr_roll, &qr_pitch, &qr_yaw);
+    p3f("quat_euler_gimbal", qr_roll, qr_pitch, qr_yaw);
+
+    const BreezeVector3D axis_xyz = {1.0f, 2.0f, 2.0f};
+    BreezeQuaternion_FromAxisAngle(&qa, &axis_xyz, 0.7f);
+    pq("quat_from_axis_angle", &qa);
+
+    /* A degenerate axis: the C version falls back to the identity rather than
+     * failing, because "rotate by any angle about no axis" has an answer. */
+    BreezeQuaternion_FromAxisAngle(&qa, &(const BreezeVector3D){0.0f, 0.0f, 0.0f}, 0.7f);
+    pq("quat_from_axis_angle_degenerate", &qa);
+
+    const BreezeVector3D axis_x = {1.0f, 0.0f, 0.0f};
+    BreezeQuaternion_FromAxisAngle(&qa, &axis_x, (float)(M_PI / 3.0));
+    pq("quat_from_axis_angle_x", &qa);
+
+    BreezeQuaternion_Init(&qa, 1.5f, -2.5f, 3.25f, -4.75f);
+    pf("quat_magnitude", BreezeQuaternion_Magnitude(&qa));
+
+    pi("quat_normalize_ok", BreezeQuaternion_Normalize(&qr, &qa));
+    pq("quat_normalize", &qr);
+
+    /* Note the threshold asymmetry, which the port has to keep: Normalize
+     * compares the *magnitude* against 1e-6 while Inverse compares the squared
+     * magnitude against the same number. A quaternion of magnitude 1e-4 is
+     * therefore accepted by one and refused by the other. */
+    pq("quat_normalize_degenerate_untouched", &(const BreezeQuaternion){9.0f, 9.0f, 9.0f, 9.0f});
+    pi("quat_normalize_degenerate_ok", BreezeQuaternion_Normalize(&(BreezeQuaternion){9.0f, 9.0f, 9.0f, 9.0f}, &(const BreezeQuaternion){1.0e-7f, 0.0f, 0.0f, 0.0f}));
+    pi("quat_inverse_degenerate_ok", BreezeQuaternion_Inverse(&(BreezeQuaternion){9.0f, 9.0f, 9.0f, 9.0f}, &(const BreezeQuaternion){1.0e-7f, 0.0f, 0.0f, 0.0f}));
+    /* Magnitude 1e-4: Normalize accepts (1e-4 >= 1e-6), Inverse refuses
+     * (1e-8 < 1e-6). Both statuses are captured so the asymmetry is pinned. */
+    pi("quat_normalize_boundary_ok", BreezeQuaternion_Normalize(&(BreezeQuaternion){9.0f, 9.0f, 9.0f, 9.0f}, &(const BreezeQuaternion){1.0e-4f, 0.0f, 0.0f, 0.0f}));
+    pi("quat_inverse_boundary_ok", BreezeQuaternion_Inverse(&(BreezeQuaternion){9.0f, 9.0f, 9.0f, 9.0f}, &(const BreezeQuaternion){1.0e-4f, 0.0f, 0.0f, 0.0f}));
+
+    BreezeQuaternion_Init(&qa, 1.5f, -2.5f, 3.25f, -4.75f);
+    BreezeQuaternion_Conjugate(&qr, &qa);
+    pq("quat_conjugate", &qr);
+
+    pi("quat_inverse_ok", BreezeQuaternion_Inverse(&qr, &qa));
+    pq("quat_inverse", &qr);
+
+    /* 90 degrees about z, then 90 degrees about x: two unit quaternions whose
+     * product is another one, and whose components are exactly representable
+     * halves of a square root - no special values, no gimbal lock. */
+    const BreezeVector3D axis_z = {0.0f, 0.0f, 1.0f};
+    BreezeQuaternion_FromAxisAngle(&qa, &axis_z, (float)(M_PI / 2.0));
+    BreezeQuaternion_FromAxisAngle(&qb, &axis_x, (float)(M_PI / 2.0));
+    pq("quat_z90", &qa);
+    pq("quat_x90", &qb);
+
+    BreezeQuaternion_Multiply(&qr, &qa, &qb);
+    pq("quat_multiply", &qr);
+
+    /* The in-place spelling the C version supports by multiplying into a
+     * temporary. */
+    BreezeQuaternion q_in_place = qa;
+    BreezeQuaternion_Multiply(&q_in_place, &q_in_place, &qb);
+    pq("quat_multiply_in_place", &q_in_place);
+
+    const BreezeVector3D vx = {1.0f, 0.0f, 0.0f};
+    BreezeVector3D vr;
+    BreezeQuaternion_RotateVector(&vr, &qa, &vx);
+    p3("quat_rotate", vr);
+
+    /* Result aliasing the input vector: the C version writes only at the end,
+     * so this is safe there too. */
+    vr = vx;
+    BreezeQuaternion_RotateVector(&vr, &qa, &vr);
+    p3("quat_rotate_in_place", vr);
+
+    BreezeQuaternion_SetIdentity(&qb);
+    BreezeQuaternion_Slerp(&qr, &qb, &qa, 0.0f);
+    pq("quat_slerp_t0", &qr);
+    BreezeQuaternion_Slerp(&qr, &qb, &qa, 0.25f);
+    pq("quat_slerp_t025", &qr);
+    BreezeQuaternion_Slerp(&qr, &qb, &qa, 0.5f);
+    pq("quat_slerp_t05", &qr);
+    BreezeQuaternion_Slerp(&qr, &qb, &qa, 1.0f);
+    pq("quat_slerp_t1", &qr);
+    /* t outside [0, 1] is clamped, not extrapolated. */
+    BreezeQuaternion_Slerp(&qr, &qb, &qa, 1.5f);
+    pq("quat_slerp_clamped", &qr);
+
+    /* Nearly identical inputs take the linear branch (dot > 0.9999). */
+    BreezeQuaternion_Slerp(&qr, &qb, &qb, 0.5f);
+    pq("quat_slerp_linear_branch", &qr);
+
+    /* Negative dot: the C version negates b to take the short way round. */
+    BreezeQuaternion_Init(&qb, -1.0f, 0.0f, 0.0f, 0.0f);
+    BreezeQuaternion_Slerp(&qr, &qa, &qb, 0.5f);
+    pq("quat_slerp_negative_dot", &qr);
 
     return 0;
 }

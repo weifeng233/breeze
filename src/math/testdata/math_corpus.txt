@@ -82,3 +82,38 @@ matrix_inverse_dispatch_2x2 0.600000024 -0.699999988 -0.200000003 0.400000006
 matrix_inverse_4x4_ok 0
 matrix_inverse_singular_ok 0
 matrix_inverse_singular_untouched 1 2 3 4
+quat_layout 16 4
+quat_identity 1 0 0 0
+quat_init 1.5 -2.5 3.25 -4.75
+quat_from_euler_zyx 0.810630739 0.227536067 -0.0909162015 0.531826496
+quat_from_euler_zyx_zero 1 0 0 0
+quat_euler_roundtrip 0.300000042 -0.400000036 1.10000002
+quat_from_euler_zyx_gimbal 0.651288509 -0.275360376 0.651288509 0.275360376
+quat_euler_gimbal 0 1.57079637 -0.962284148
+quat_from_axis_angle 0.939372718 0.114299268 0.228598535 0.228598535
+quat_from_axis_angle_degenerate 1 0 0 0
+quat_from_axis_angle_x 0.866025388 0.5 0 0
+quat_magnitude 6.45174408
+quat_normalize_ok 1
+quat_normalize 0.232495278 -0.38749212 0.503739774 -0.736235023
+quat_normalize_degenerate_untouched 9 9 9 9
+quat_normalize_degenerate_ok 0
+quat_inverse_degenerate_ok 0
+quat_normalize_boundary_ok 1
+quat_inverse_boundary_ok 0
+quat_conjugate 1.5 2.5 -3.25 4.75
+quat_inverse_ok 1
+quat_inverse 0.0360360369 0.0600600615 -0.0780780762 0.114114113
+quat_z90 0.707106769 0 0 0.707106769
+quat_x90 0.707106769 0.707106769 0 0
+quat_multiply 0.49999997 0.49999997 0.49999997 0.49999997
+quat_multiply_in_place 0.49999997 0.49999997 0.49999997 0.49999997
+quat_rotate 0 0.99999994 0
+quat_rotate_in_place 0 0.99999994 0
+quat_slerp_t0 1 0 0 0
+quat_slerp_t025 0.98078537 0 0 0.195090324
+quat_slerp_t05 0.923879504 0 0 0.382683426
+quat_slerp_t1 0.707106829 0 0 0.707106829
+quat_slerp_clamped 0.707106829 0 0 0.707106829
+quat_slerp_linear_branch 1 0 0 0
+quat_slerp_negative_dot 0.923879504 0 0 0.382683426

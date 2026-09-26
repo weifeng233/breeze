@@ -13,6 +13,7 @@ const std = @import("std");
 
 pub const vector = @import("vector.zig");
 pub const matrix = @import("matrix.zig");
+pub const quaternion = @import("quaternion.zig");
 
 test {
     std.testing.refAllDecls(@This());
