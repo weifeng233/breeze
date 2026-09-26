@@ -203,3 +203,45 @@ median_update_without_init 3.5
 median_image_3x3 20 30 40 40 50 60 70 70 80 90 100 100
 median_image_even_kernel 30 40 40 40 50 60 70 70 80 80 90 100
 median_image_stride 2 3 3 238 238 4 5 6 238 238 7 7 8 238 238
+pid_position_run 10 -3.99249983 -7.39350128 3.20700073 -2.19350052 1.00650024
+pid_position_integral_after 0.0129999993
+pid_position_prev_error_after 0
+pid_position_prev_measurement_after 1
+pid_incremental_run 10 -10 -10 10 -10 10
+pid_incremental_prev_output_after 10
+pid_incremental_prev_error_after 0
+pid_incremental_prev_prev_error_after -0.100000024
+pid_position_alpha0_run 10 -3.99249983 -7.39350128 3.20700073 -2.19350076 1.00650036
+pid_position_alpha07_run 5.00500011 -3.99249983 -7.39350128 3.20700073 -2.19350076 1.00650036
+pid_position_alpha1_run 2.00500011 -3.99249983 -7.39350128 3.20700073 -2.19350076 1.00650036
+pid_alpha_clamped_low 0
+pid_alpha_clamped_high 1
+pid_position_integral_clamped_run 0.099999994 0.199999988 0.299999982 0.399999976 0.49999997 0.5
+pid_integral_after_clamp 0.5
+pid_position_output_clamped_run 1 1 -1 1 -1 0
+pid_integral_after_reset 0
+pid_prev_error_after_reset 0
+pid_prev_output_after_reset 0
+pid_run_after_reset 10 -3.99249983 -7.39350128 3.20700073 -2.19350052 1.00650024
+statefb_layout 36 4
+statefb_k0 1.5
+statefb_k1 0.5
+statefb_reference_init 0
+statefb_n_init 0.5
+statefb_compute -0.150000006
+statefb_compute_with_reference 0.850000024
+statefb_compute_clamped_high 5
+statefb_compute_clamped_low -5
+statefb4_compute -3
+lqr_layout 144 4
+lqr_k0_after_init 0
+lqr_k1_after_init 0
+lqr_a00_stored 1
+lqr_a01_stored 1
+lqr_b1_stored 1
+lqr_q0_stored 1
+lqr_r_stored 0.100000001
+lqr_max_iterations_stored 100
+lqr_convergence_tol_stored 9.99999975e-05
+lqr_compute -0.150000006
+lqr_compute_with_reference 0.850000024

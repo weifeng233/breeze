@@ -936,6 +936,46 @@ Zig 版把它变成 `error.InvalidTimeConstant`，而 C 的那份结果仍然记
 filter 五个模块到此完成：**51 个算法测试**（math 31 + filter 20）。下一阶段是
 `control`（10 个头文件、2375 行、含 `platform/` 下 6 个平台控制器），是目前最大的一块。
 
+## 34. control 阶段开始：pid 与 state_feedback（control 进行中）
+
+**「微分滤波」不滤波。** `pid_controller.h` 的位置式里，被 alpha 混合的两项在解析上是
+同一个量：
+
+```text
+derivative           = (measurement - prev_measurement) / dt
+(prev_error - error) = (measurement - prev_measurement) / dt      [设定值不变时]
+```
+
+所以 `alpha * derivative + (1 - alpha) * derivative` 是**一个值与自己的凸组合**。
+语料把边界也划清了：三条不同 alpha 的运行（0 / 0.7 / 1）**只在第一个样本**上不同——
+因为 `prev_error` 的初值是 0、而首次误差不是——之后逐位一致，剩下的差别只是混合的舍入
+（alpha=0.1 的运行在第 5、6 个样本上差最后一位，0.7 与 1 则完全相同）。
+`SetDerivativeFilter` 因此只改变第一个输出和最后一位。移植**照原样计算**并把这条性质
+写成断言（首样本不同、其余逐位相同），而不是"顺手清理"——清理之后就不再等于它要替代的
+那份实现了。增量式里 alpha 根本没被读过。
+
+**`state_feedback` 里那个没人读的模型。** `BreezeLQRController_Init` 会存下
+`A`/`B`/`Q`/`R`、`max_iterations`、`convergence_tol`，注释写着"完整的 LQR 求解器需要
+矩阵运算支持，将在数学工具模块中实现"——而矩阵模块现在有了，它从没被写出来。移植做了
+两件事：
+
+* **模型字段消失**。它们被存进去、没有任何东西读；留着它们会让调用者以为自己传的模型
+  算出了增益。去掉之后那种误解**无法编译**。语料仍记下它们（`lqr_a00_stored`、
+  `lqr_max_iterations_stored`…），缺口是可见的。
+* **两个类型合成一个**。两个 C 的 `Compute` 是同样的代码作用在同样的字段上，
+  于是语料同时记录两者，而这里一份实现同时对上两者。
+
+要写 Riccati 求解器，那是一次带自己测试的功能变更，不是迁移：没有可供对照的 C 行为。
+
+另外，C 的状态维度是运行期值、由固定数组限死为 4；Zig 版做成 comptime 参数且无上限，
+因为那个上限是**存储方式的产物**，不是控制律的规则。
+
+**四条变异探针**：位置式去掉微分项负号 → 5 个测试红；去掉抗积分饱和钳位 → 3 个红；
+增量式改成走位置式 → 3 个红；状态反馈的求和符号反过来 → 5 个红。
+
+control 还剩 `fuzzy`（394 行，是 control 里唯一带分配的：4 处 `malloc`）、
+`adaptive`（287 行），以及 `platform/` 下 6 个平台控制器。
+
 ## 29. math/quaternion（已完成）
 
 三处 `int` 返回值变成类型：`Normalize`、`Inverse` 用 `error.Degenerate`，`ToEulerZYX`

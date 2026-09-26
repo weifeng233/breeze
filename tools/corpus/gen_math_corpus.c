@@ -33,6 +33,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../../include/breeze/control/pid_controller.h"
+#include "../../include/breeze/control/state_feedback_controller.h"
 #include "../../include/breeze/filter/complementary_filter.h"
 #include "../../include/breeze/filter/high_pass_filter.h"
 #include "../../include/breeze/filter/kalman_filter.h"
@@ -759,6 +761,134 @@ int main(void) {
     memset(dst_str, 0xEE, sizeof dst_str);
     BreezeMedianFilterImage(src_str, dst_str, 3, 3, 3, 5);
     pbytes("median_image_stride", dst_str, 15);
+
+    /* --- PID controllers -------------------------------------------------- */
+    BreezePIDController pid;
+    const float pmeas[] = {0.0f, 0.5f, 1.2f, 0.9f, 1.1f, 1.0f};
+
+    BreezePIDController_Init(&pid, BREEZE_PID_POSITION, 2.0f, 0.5f, 0.1f, 0.01f, -10.0f, 10.0f);
+    BreezePIDController_SetSetpoint(&pid, 1.0f);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezePIDController_Compute(&pid, pmeas[step_i]);
+    pvals("pid_position_run", run, 6);
+    pf("pid_position_integral_after", pid.integral);
+    pf("pid_position_prev_error_after", pid.prev_error);
+    pf("pid_position_prev_measurement_after", pid.prev_measurement);
+
+    /* The incremental form keeps its own history and adds a delta to the
+     * previous output. */
+    BreezePIDController_Init(&pid, BREEZE_PID_INCREMENTAL, 2.0f, 0.5f, 0.1f, 0.01f, -10.0f, 10.0f);
+    BreezePIDController_SetSetpoint(&pid, 1.0f);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezePIDController_Compute(&pid, pmeas[step_i]);
+    pvals("pid_incremental_run", run, 6);
+    pf("pid_incremental_prev_output_after", pid.prev_output);
+    pf("pid_incremental_prev_error_after", pid.prev_error);
+    pf("pid_incremental_prev_prev_error_after", pid.prev_prev_error);
+
+    /* The derivative filter, three ways. In the position form the two terms of
+     * the "filter" are the same quantity - `(prev_error - error)/dt` is exactly
+     * `(measurement - prev_measurement)/dt` for a fixed setpoint - so alpha is a
+     * convex combination of a value with itself. Whether that changes any bit is
+     * what these three runs are for. In the incremental form alpha is never read
+     * at all. */
+    BreezePIDController_Init(&pid, BREEZE_PID_POSITION, 2.0f, 0.5f, 0.1f, 0.01f, -10.0f, 10.0f);
+    BreezePIDController_SetDerivativeFilter(&pid, 0.0f);
+    BreezePIDController_SetSetpoint(&pid, 1.0f);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezePIDController_Compute(&pid, pmeas[step_i]);
+    pvals("pid_position_alpha0_run", run, 6);
+
+    BreezePIDController_Init(&pid, BREEZE_PID_POSITION, 2.0f, 0.5f, 0.1f, 0.01f, -10.0f, 10.0f);
+    BreezePIDController_SetDerivativeFilter(&pid, 0.7f);
+    BreezePIDController_SetSetpoint(&pid, 1.0f);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezePIDController_Compute(&pid, pmeas[step_i]);
+    pvals("pid_position_alpha07_run", run, 6);
+
+    BreezePIDController_Init(&pid, BREEZE_PID_POSITION, 2.0f, 0.5f, 0.1f, 0.01f, -10.0f, 10.0f);
+    BreezePIDController_SetDerivativeFilter(&pid, 1.0f);
+    BreezePIDController_SetSetpoint(&pid, 1.0f);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezePIDController_Compute(&pid, pmeas[step_i]);
+    pvals("pid_position_alpha1_run", run, 6);
+
+    BreezePIDController_SetDerivativeFilter(&pid, -1.0f);
+    pf("pid_alpha_clamped_low", pid.alpha);
+    BreezePIDController_SetDerivativeFilter(&pid, 2.0f);
+    pf("pid_alpha_clamped_high", pid.alpha);
+
+    /* Anti-windup: the integral is clamped to its own limits, which `Init` sets
+     * to the output limits unless the caller overrides them. */
+    BreezePIDController_Init(&pid, BREEZE_PID_POSITION, 0.0f, 1.0f, 0.0f, 0.01f, -10.0f, 10.0f);
+    BreezePIDController_SetIntegralLimits(&pid, -0.5f, 0.5f);
+    BreezePIDController_SetSetpoint(&pid, 10.0f);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezePIDController_Compute(&pid, 0.0f);
+    pvals("pid_position_integral_clamped_run", run, 6);
+    pf("pid_integral_after_clamp", pid.integral);
+
+    BreezePIDController_Init(&pid, BREEZE_PID_POSITION, 100.0f, 0.0f, 0.0f, 0.01f, -1.0f, 1.0f);
+    BreezePIDController_SetSetpoint(&pid, 1.0f);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezePIDController_Compute(&pid, pmeas[step_i]);
+    pvals("pid_position_output_clamped_run", run, 6);
+
+    BreezePIDController_Init(&pid, BREEZE_PID_POSITION, 2.0f, 0.5f, 0.1f, 0.01f, -10.0f, 10.0f);
+    BreezePIDController_SetSetpoint(&pid, 1.0f);
+    for (step_i = 0; step_i < 3; step_i++) (void)BreezePIDController_Compute(&pid, pmeas[step_i]);
+    BreezePIDController_Reset(&pid);
+    pf("pid_integral_after_reset", pid.integral);
+    pf("pid_prev_error_after_reset", pid.prev_error);
+    pf("pid_prev_output_after_reset", pid.prev_output);
+    for (step_i = 0; step_i < 6; step_i++) run[step_i] = BreezePIDController_Compute(&pid, pmeas[step_i]);
+    pvals("pid_run_after_reset", run, 6);
+
+    /* --- state feedback, and the LQR that stores a model nobody reads ------- */
+    BreezeStateFeedbackController sfc;
+    const float K2[] = {1.5f, 0.5f};
+    const float st2[] = {0.2f, -0.3f};
+    const float K4[] = {1.0f, 2.0f, 3.0f, 4.0f};
+    const float st4[] = {0.1f, 0.2f, 0.3f, 0.4f};
+
+    printf("statefb_layout %zu %zu\n", sizeof sfc, _Alignof(BreezeStateFeedbackController));
+
+    BreezeStateFeedbackController_Init(&sfc, K2, 2, 0.5f, -5.0f, 5.0f);
+    pf("statefb_k0", sfc.K[0]);
+    pf("statefb_k1", sfc.K[1]);
+    pf("statefb_reference_init", sfc.reference);
+    pf("statefb_n_init", sfc.N);
+    pf("statefb_compute", BreezeStateFeedbackController_Compute(&sfc, st2));
+    BreezeStateFeedbackController_SetReference(&sfc, 2.0f);
+    pf("statefb_compute_with_reference", BreezeStateFeedbackController_Compute(&sfc, st2));
+    BreezeStateFeedbackController_SetReference(&sfc, 100.0f);
+    pf("statefb_compute_clamped_high", BreezeStateFeedbackController_Compute(&sfc, st2));
+    BreezeStateFeedbackController_SetReference(&sfc, -100.0f);
+    pf("statefb_compute_clamped_low", BreezeStateFeedbackController_Compute(&sfc, st2));
+
+    BreezeStateFeedbackController_Init(&sfc, K4, 4, 1.0f, -100.0f, 100.0f);
+    pf("statefb4_compute", BreezeStateFeedbackController_Compute(&sfc, st4));
+
+    BreezeLQRController lqr;
+    const float A2[4][4] = {{1.0f, 1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 0.0f}};
+    const float B2[] = {0.0f, 1.0f};
+    const float Q2[] = {1.0f, 1.0f};
+
+    printf("lqr_layout %zu %zu\n", sizeof lqr, _Alignof(BreezeLQRController));
+
+    BreezeLQRController_Init(&lqr, A2, B2, Q2, 0.1f, 2, 0.5f, -5.0f, 5.0f, 100, 1.0e-4f);
+    /* Init stores the model and zeroes the gains: the Riccati solver it was
+     * preparing for was never written, so none of these are read by anything. */
+    pf("lqr_k0_after_init", lqr.K[0]);
+    pf("lqr_k1_after_init", lqr.K[1]);
+    pf("lqr_a00_stored", lqr.A[0][0]);
+    pf("lqr_a01_stored", lqr.A[0][1]);
+    pf("lqr_b1_stored", lqr.B[1]);
+    pf("lqr_q0_stored", lqr.Q[0]);
+    pf("lqr_r_stored", lqr.R);
+    pf("lqr_max_iterations_stored", (float)lqr.max_iterations);
+    pf("lqr_convergence_tol_stored", lqr.convergence_tol);
+
+    /* With gains supplied from outside, the LQR computes exactly what the plain
+     * state feedback controller computes - the two Compute functions are the
+     * same code. */
+    BreezeLQRController_SetGains(&lqr, K2);
+    pf("lqr_compute", BreezeLQRController_Compute(&lqr, st2));
+    BreezeLQRController_SetReference(&lqr, 2.0f);
+    pf("lqr_compute_with_reference", BreezeLQRController_Compute(&lqr, st2));
 
     return 0;
 }
