@@ -8,10 +8,16 @@
 //! * adding a 2x3 to a 3x2,
 //! * multiplying with mismatched inner dimensions,
 //! * taking the determinant of a non-square matrix,
-//! * and asking for a 4x4 determinant or inverse, which the C version answers
-//!   with `0` ("4x4 and larger are not implemented") - the port refuses to
-//!   compile instead of returning a plausible number. Filling that gap is a
-//!   deliberate future change, not something a migration should smuggle in.
+//! * and asking for a determinant or inverse of something larger than 4x4.
+//!
+//! The C version answered a 4x4 determinant or inverse with `0` ("4x4 and larger
+//! are not implemented"), and the port used to refuse to compile for it, on the
+//! grounds that filling the gap is a deliberate change rather than something a
+//! migration should smuggle in. **It has now been filled deliberately** (§28 said
+//! it should be its own change with its own tests, and this is it): 4x4 works, and
+//! anything larger still does not compile. REVIEW §54 has the method and the
+//! evidence, including the one test that matters most - a 4x4 inverse agreeing with
+//! the 3x3 one on the block they share.
 //!
 //! Two more differences worth naming:
 //!
@@ -26,8 +32,11 @@
 //!   here; the inverse is covered by a test that multiplies a matrix by its own
 //!   inverse and expects the identity.
 //!
-//! The arithmetic is checked against the C implementation through
-//! `testdata/math_corpus.txt` (see `corpus.zig`).
+//! The 2x2 and 3x3 arithmetic is checked against the C implementation through
+//! `testdata/math_corpus.txt` (see `corpus.zig`). The 4x4 has no such oracle - the
+//! C never computed one - so it is checked against arithmetic instead: against the
+//! 3x3 implementation on a shared block, and against the properties a determinant
+//! and an inverse have to satisfy.
 
 const std = @import("std");
 
@@ -124,8 +133,34 @@ pub fn Mat(comptime rows: usize, comptime cols: usize) type {
             return out;
         }
 
-        /// 2x2 and 3x3 only; anything else is a compile error rather than the
+        /// The determinant of the 3x3 submatrix left by deleting row `skip_row`
+        /// and column `skip_col`. Only meaningful for a 4x4 `Self`, and only used
+        /// by the 4x4 determinant and adjugate below.
+        fn minor3(a: Self, comptime skip_row: usize, comptime skip_col: usize) f32 {
+            var minor: Mat3 = undefined;
+            comptime var r: usize = 0;
+            inline for (0..rows) |i| {
+                if (i != skip_row) {
+                    comptime var c: usize = 0;
+                    inline for (0..cols) |j| {
+                        if (j != skip_col) {
+                            minor.data[r][c] = a.data[i][j];
+                            c += 1;
+                        }
+                    }
+                    r += 1;
+                }
+            }
+            return minor.determinant();
+        }
+
+        /// 2x2, 3x3 and 4x4; anything else is a compile error rather than the
         /// C version's `0.0f`.
+        ///
+        /// The 4x4 is the cofactor expansion along the first row, so its four
+        /// minors are the same 3x3 expression the 3x3 case uses - the same
+        /// arithmetic style as the smaller sizes rather than a pivoting algorithm,
+        /// which is what makes the cross-check in the tests possible.
         pub fn determinant(a: Self) f32 {
             if (rows != cols) @compileError("matrix determinant: must be square");
             return switch (rows) {
@@ -133,15 +168,25 @@ pub fn Mat(comptime rows: usize, comptime cols: usize) type {
                 3 => a.data[0][0] * (a.data[1][1] * a.data[2][2] - a.data[1][2] * a.data[2][1]) -
                     a.data[0][1] * (a.data[1][0] * a.data[2][2] - a.data[1][2] * a.data[2][0]) +
                     a.data[0][2] * (a.data[1][0] * a.data[2][1] - a.data[1][1] * a.data[2][0]),
-                else => @compileError("matrix determinant is implemented for 2x2 and 3x3 only"),
+                4 => a.data[0][0] * minor3(a, 0, 0) - a.data[0][1] * minor3(a, 0, 1) +
+                    a.data[0][2] * minor3(a, 0, 2) - a.data[0][3] * minor3(a, 0, 3),
+                else => @compileError("matrix determinant is implemented for 2x2, 3x3 and 4x4 only"),
             };
         }
 
-        /// 2x2 and 3x3 only, by the adjugate over the determinant - the same
-        /// formula, in the same order, as the C version.
+        /// 2x2, 3x3 and 4x4, by the adjugate over the determinant - the same
+        /// formula, in the same order, as the C version for the sizes it had.
         ///
         /// `error.Singular` replaces the C `0` return; unlike the C function,
         /// failing produces no half-written matrix to be confused by.
+        ///
+        /// The 4x4 adjugate is the transpose of the cofactor matrix, so entry
+        /// `(i, j)` is the cofactor of `(j, i)` - hence the swapped `minor3`
+        /// arguments. Chosen over Gauss-Jordan with partial pivoting because it
+        /// keeps the module's arithmetic explicit and pivot-free, and because it
+        /// makes the 3x3 cross-check below a real one; the price is accuracy on
+        /// ill-conditioned matrices, which REVIEW §54 measures for the test cases
+        /// rather than assuming.
         pub fn inverse(a: Self) Singular!Self {
             if (rows != cols) @compileError("matrix inverse: must be square");
 
@@ -170,7 +215,17 @@ pub fn Mat(comptime rows: usize, comptime cols: usize) type {
                         (a.data[0][0] * a.data[1][1] - a.data[0][1] * a.data[1][0]) / det,
                     },
                 }),
-                else => @compileError("matrix inverse is implemented for 2x2 and 3x3 only"),
+                4 => blk: {
+                    var out: Mat(4, 4) = undefined;
+                    inline for (0..4) |i| {
+                        inline for (0..4) |j| {
+                            const sign: f32 = if ((i + j) % 2 == 0) 1.0 else -1.0;
+                            out.data[i][j] = sign * minor3(a, j, i) / det;
+                        }
+                    }
+                    break :blk out;
+                },
+                else => @compileError("matrix inverse is implemented for 2x2, 3x3 and 4x4 only"),
             };
         }
     };
@@ -382,4 +437,192 @@ test "matrix: an inverse really is an inverse" {
             try std.testing.expectApproxEqAbs(m.data[i][j], in_place.data[i][j], 1.0e-4);
         }
     }
+}
+
+/// A 4x4 matrix with a chosen top-left 3x3 block, ones on the rest of the diagonal
+/// and zeros elsewhere. The 4x4 inverse of such a matrix has that block's inverse
+/// in the same corner, which is what the cross-check below uses.
+fn embed(m: Mat3) Mat4 {
+    var out = Mat4.identity();
+    for (0..3) |i| {
+        for (0..3) |j| out.data[i][j] = m.data[i][j];
+    }
+    return out;
+}
+
+test "matrix 4x4: the determinant has the properties a determinant has" {
+    // Independent of any oracle - there is none, the C never computed a 4x4.
+    const id = Mat4.identity();
+    try std.testing.expectEqual(@as(f32, 1.0), id.determinant());
+
+    // Triangular: the product of the diagonal, exactly in f32 for these values.
+    const tri = Mat4.init(.{
+        .{ 2, 9, 9, 9 },
+        .{ 0, 3, 9, 9 },
+        .{ 0, 0, 4, 9 },
+        .{ 0, 0, 0, 5 },
+    });
+    try std.testing.expectEqual(@as(f32, 120.0), tri.determinant());
+
+    // Transpose leaves it alone, and a row swap flips its sign.
+    const m = Mat4.init(.{
+        .{ 4, 7, 2, 1 },
+        .{ 3, 6, 1, 0 },
+        .{ 2, 5, 3, 8 },
+        .{ 1, 1, 1, 2 },
+    });
+    try std.testing.expectApproxEqAbs(m.determinant(), m.transpose().determinant(), 1.0e-4);
+
+    const swapped = Mat4.init(.{
+        .{ 3, 6, 1, 0 },
+        .{ 4, 7, 2, 1 },
+        .{ 2, 5, 3, 8 },
+        .{ 1, 1, 1, 2 },
+    });
+    try std.testing.expectApproxEqAbs(-m.determinant(), swapped.determinant(), 1.0e-4);
+
+    // Multiplication: det(AB) = det(A)·det(B).
+    const n = Mat4.init(.{
+        .{ 1, 0, 2, 0 },
+        .{ 0, 3, 0, 1 },
+        .{ 4, 0, 1, 0 },
+        .{ 0, 1, 0, 2 },
+    });
+    try std.testing.expectApproxEqRel(
+        m.determinant() * n.determinant(),
+        m.mul(n).determinant(),
+        1.0e-3,
+    );
+
+    // Scaling one row scales it by the same factor.
+    var scaled = m;
+    for (0..4) |j| scaled.data[1][j] *= 3.0;
+    try std.testing.expectApproxEqRel(3.0 * m.determinant(), scaled.determinant(), 1.0e-4);
+}
+
+test "matrix 4x4: the inverse agrees with the 3x3 one on the block they share" {
+    // Two independent code paths - the 4x4 adjugate and the 3x3 formula - have to
+    // produce the same numbers in the corner they share. That is the strongest
+    // check available for code with no oracle: it is not one formula checked
+    // against itself.
+    const blocks = [_]Mat3{
+        .{ .data = .{ .{ 4, 7, 2 }, .{ 3, 6, 1 }, .{ 2, 5, 3 } } },
+        .{ .data = .{ .{ 1, 2, 3 }, .{ 0, 1, 4 }, .{ 5, 6, 0 } } },
+        .{ .data = .{ .{ 2, 0, 0 }, .{ 0, -3, 0 }, .{ 0, 0, 0.5 } } },
+        .{ .data = .{ .{ 0, 1, 0 }, .{ 0, 0, 1 }, .{ 1, 0, 0 } } },
+    };
+
+    for (blocks) |block| {
+        const big = embed(block);
+        const big_inverse = try big.inverse();
+        const small_inverse = try block.inverse();
+
+        for (0..3) |i| {
+            for (0..3) |j| {
+                try std.testing.expectApproxEqAbs(
+                    small_inverse.data[i][j],
+                    big_inverse.data[i][j],
+                    1.0e-5,
+                );
+            }
+        }
+
+        // And the border is untouched: the embedded identity part stays identity.
+        for (0..3) |i| {
+            try std.testing.expectApproxEqAbs(@as(f32, 0.0), big_inverse.data[i][3], 1.0e-5);
+            try std.testing.expectApproxEqAbs(@as(f32, 0.0), big_inverse.data[3][i], 1.0e-5);
+        }
+        try std.testing.expectApproxEqAbs(@as(f32, 1.0), big_inverse.data[3][3], 1.0e-5);
+
+        // det of the embedded matrix is the block's determinant, so this also
+        // cross-checks the 4x4 determinant against the 3x3 one.
+        try std.testing.expectApproxEqAbs(block.determinant(), big.determinant(), 1.0e-5);
+    }
+}
+
+test "matrix 4x4: an inverse really is an inverse" {
+    const m = Mat4.init(.{
+        .{ 4, 7, 2, 1 },
+        .{ 3, 6, 1, 0 },
+        .{ 2, 5, 3, 8 },
+        .{ 1, 1, 1, 2 },
+    });
+    try expectIdentity(m.mul(try m.inverse()));
+
+    // How close, measured rather than assumed: the worst element of `A·A⁻¹ − I` is
+    // 4.8e-7 for this matrix (and 6.3e-7 for the 3x3 path that was already here),
+    // so the adjugate on 4x4 is no less accurate than the smaller sizes. The bound
+    // below is tight enough that a real accuracy regression trips it.
+    const product = m.mul(try m.inverse());
+    var worst: f32 = 0;
+    for (0..4) |i| {
+        for (0..4) |j| {
+            const want: f32 = if (i == j) 1.0 else 0.0;
+            worst = @max(worst, @abs(product.data[i][j] - want));
+        }
+    }
+    try std.testing.expect(worst < 2.0e-6);
+
+    // A second one, so a single lucky case is not the evidence. This one is
+    // structured enough that the product comes out exactly identity.
+    const n = Mat4.init(.{
+        .{ 1, 2, 0, 0 },
+        .{ 0, 1, 3, 0 },
+        .{ 0, 0, 1, 4 },
+        .{ 2, 0, 0, 1 },
+    });
+    try expectIdentity(n.mul(try n.inverse()));
+
+    // Inverse twice gives the original back.
+    const twice = try (try n.inverse()).inverse();
+    for (0..4) |i| {
+        for (0..4) |j| try std.testing.expectApproxEqAbs(n.data[i][j], twice.data[i][j], 1.0e-4);
+    }
+
+    // A permutation matrix: its inverse is its transpose, exactly, because every
+    // entry is 0 or 1 and the determinant is ±1.
+    const perm = Mat4.init(.{
+        .{ 0, 1, 0, 0 },
+        .{ 0, 0, 1, 0 },
+        .{ 0, 0, 0, 1 },
+        .{ 1, 0, 0, 0 },
+    });
+    const perm_inverse = try perm.inverse();
+    const permT = perm.transpose();
+    for (0..4) |i| {
+        for (0..4) |j| try std.testing.expectEqual(permT.data[i][j], perm_inverse.data[i][j]);
+    }
+}
+
+test "matrix 4x4: a singular matrix is refused at the same threshold as the smaller sizes" {
+    // A duplicated row: determinant exactly 0.
+    const repeated = Mat4.init(.{
+        .{ 1, 2, 3, 4 },
+        .{ 1, 2, 3, 4 },
+        .{ 5, 6, 7, 8 },
+        .{ 9, 10, 11, 12 },
+    });
+    try std.testing.expectEqual(@as(f32, 0.0), repeated.determinant());
+    try std.testing.expectError(error.Singular, repeated.inverse());
+
+    // A dependent row (row3 = row1 + row2) is singular without being a duplicate.
+    const dependent = Mat4.init(.{
+        .{ 1, 2, 3, 4 },
+        .{ 2, 3, 4, 5 },
+        .{ 3, 5, 7, 9 },
+        .{ 1, 1, 1, 1 },
+    });
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), dependent.determinant(), 1.0e-5);
+    try std.testing.expectError(error.Singular, dependent.inverse());
+
+    // Not exactly singular, but under the threshold: refused too, which is the
+    // constant the C chose and the port kept.
+    const tiny = Mat4.init(.{
+        .{ 1, 0, 0, 0 },
+        .{ 0, 1, 0, 0 },
+        .{ 0, 0, 1, 0 },
+        .{ 0, 0, 0, 1.0e-7 },
+    });
+    try std.testing.expect(@abs(tiny.determinant()) < min_determinant);
+    try std.testing.expectError(error.Singular, tiny.inverse());
 }
