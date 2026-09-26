@@ -91,7 +91,7 @@ pub fn applyOtsu(
 
 // --- tests ------------------------------------------------------------------
 
-// The exact images `tools/corpus/gen_math_corpus.c` passes, byte for byte.
+// The exact images the (archived) `tools/corpus/gen_math_corpus.c` passes, byte for byte.
 //
 // They are not interchangeable with rearrangements of themselves. The first
 // version of these tests sorted `img` into six dark pixels followed by six
@@ -175,7 +175,7 @@ test "otsu: the pixel count is the image's, not the stride's" {
     // depend on how many pixels the image has, so this is the case that tells the
     // C's `width * height` apart from `stride * height`: 60 when the padding is
     // excluded, 250 when it is counted. It exists because a probe that made that
-    // change stayed green against every other case - see probe_otsu_total.c.
+    // change stayed green against every other case - see the archived probe_otsu_total.c.
     var mixed = [_]u8{0xAA} ** 12;
     mixed[0] = 60;
     mixed[1] = 60;

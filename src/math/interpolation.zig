@@ -1,23 +1,26 @@
 //! Interpolation, ported from `include/breeze/math/interpolation.h`.
 //!
-//! This is the module ARCHITECTURE.md §8.2 singles out: the C spline allocates
+//! This is the module ARCHITECTURE.md §8.2 singles out: the C spline allocated
 //! thirty-four times through `malloc`/`free` - six coefficient arrays that
-//! outlive `Init`, plus five scratch arrays that do not - and an embedded target
-//! with no heap cannot use any of it. The port answers that in the two ways the
-//! section asks for:
+//! outlived `Init`, plus five scratch arrays that did not - and an embedded target
+//! with no heap cannot use any of it. This module has **no allocator at all**,
+//! which is stronger than being handed one:
 //!
-//! * `Spline(n)` is the caller-provides-the-buffer form. The knot count is a
-//!   comptime parameter, every array is a field of the value, and the scratch the
-//!   solver needs lives on the stack for the duration of `init`. **No allocator
-//!   appears anywhere**, which is stronger than passing one in.
-//! * `Dyn` takes an allocator for the case where the knot count is only known at
-//!   run time, and releases the scratch before `init` returns, so a caller
-//!   cannot leak it or confuse it with the coefficients.
+//! * `Spline(n)` is for a knot count known at the call site. `n` is a comptime
+//!   parameter, every array is a field of the value, and the scratch the solver
+//!   needs lives on the stack for the duration of `init`.
+//! * `Bounded(capacity)` is for a count only known at run time: the count is a
+//!   field, the storage is `capacity` knots' worth of arrays inside the value, and
+//!   more knots than that is `error.CapacityExceeded` rather than a growth.
+//!
+//! There was a third form once - `Dyn`, an allocator-owning port of the C's
+//! runtime-sized API - and it is gone. It was the last allocator in the algorithm
+//! layer, and `Bounded` covers the case it existed for (docs/REVIEW.md §50).
 //!
 //! The coefficient arrays are sized to the range the C solver actually writes.
-//! The C version allocates `a`, `b` and `d` with `n` entries and never writes
+//! The C version allocated `a`, `b` and `d` with `n` entries and never wrote
 //! `a[n-1]`, `b[n-1]` or `d[n-1]` - `Evaluate` cannot reach them, since the last
-//! interval ends at index `n-2` - so those three slots are uninitialised memory
+//! interval ends at index `n-2` - so those three slots were uninitialised memory
 //! there. Here `a`, `b` and `d` have `n-1` entries (one per interval) and `c` has
 //! `n`, because the back-substitution reads `c[i+1]`. The uninitialised question
 //! does not arise, and the corpus prints only the range the C code filled.
@@ -35,6 +38,8 @@ pub const Error = error{
     TooFewPoints,
     NotIncreasing,
     LengthMismatch,
+    /// More knots than the compile-time capacity of a `Bounded` spline.
+    CapacityExceeded,
 };
 
 /// The x-span below which `linear` refuses to divide, copied from the C code.
@@ -259,84 +264,86 @@ pub fn Spline(comptime n: usize) type {
     };
 }
 
-/// A spline whose knot count is only known at run time.
+/// A spline whose knot count is only known at run time, with room for
+/// `capacity` knots held in the value.
 ///
-/// The allocator owns the knots and the coefficients; the scratch the solver
-/// needs is taken and released inside `init`.
-pub const Dyn = struct {
-    allocator: std.mem.Allocator,
-    x: []f32,
-    y: []f32,
-    a: []f32,
-    b: []f32,
-    c: []f32,
-    d: []f32,
+/// This is the answer to the C's runtime-sized spline without an allocator: the
+/// count `n` is a field, the storage is `capacity` knots' worth of arrays, and
+/// nothing is taken from a heap that a firmware may not have. The cost is that
+/// the capacity is a compile-time choice, which is the same trade the rest of
+/// this port makes (`Median(window)`, `Fuzzy(level)`, `Mat(R, C)`).
+///
+/// **There is no `Dyn`.** There was one - an allocator-owning variant, ported
+/// because the C API had a runtime-sized form - and it is gone: `Spline(n)` covers
+/// the case where the count is known at the call site, and this covers the case
+/// where it is not, and between them the algorithm layer has no allocator at all
+/// (docs/REVIEW.md §50).
+pub fn Bounded(comptime capacity: usize) type {
+    if (capacity < 2) @compileError("a cubic spline needs room for at least two knots");
 
-    pub fn init(allocator: std.mem.Allocator, x: []const f32, y: []const f32) !Dyn {
-        if (x.len != y.len) return Error.LengthMismatch;
-        if (x.len < 2) return Error.TooFewPoints;
+    return struct {
+        /// How many knots are actually in use, at most `capacity`.
+        n: usize,
 
-        const n = x.len;
-        var out = Dyn{
-            .allocator = allocator,
-            .x = try allocator.dupe(f32, x),
-            .y = undefined,
-            .a = undefined,
-            .b = undefined,
-            .c = undefined,
-            .d = undefined,
-        };
-        errdefer allocator.free(out.x);
+        x: [capacity]f32,
+        y: [capacity]f32,
+        a: [capacity - 1]f32,
+        b: [capacity - 1]f32,
+        d: [capacity - 1]f32,
+        c: [capacity]f32,
 
-        out.y = try allocator.dupe(f32, y);
-        errdefer allocator.free(out.y);
+        const Self = @This();
 
-        out.a = try allocator.alloc(f32, n - 1);
-        errdefer allocator.free(out.a);
-        out.b = try allocator.alloc(f32, n - 1);
-        errdefer allocator.free(out.b);
-        out.d = try allocator.alloc(f32, n - 1);
-        errdefer allocator.free(out.d);
-        out.c = try allocator.alloc(f32, n);
+        pub const max_knots = capacity;
 
-        const h = try allocator.alloc(f32, n - 1);
-        defer allocator.free(h);
-        const alpha = try allocator.alloc(f32, n - 1);
-        defer allocator.free(alpha);
-        const l = try allocator.alloc(f32, n);
-        defer allocator.free(l);
-        const mu = try allocator.alloc(f32, n);
-        defer allocator.free(mu);
-        const z = try allocator.alloc(f32, n);
-        defer allocator.free(z);
+        pub fn init(x: []const f32, y: []const f32) Error!Self {
+            if (x.len != y.len) return Error.LengthMismatch;
+            if (x.len < 2) return Error.TooFewPoints;
+            if (x.len > capacity) return Error.CapacityExceeded;
 
-        solve(out.x, out.y, out.a, out.b, out.c, out.d, .{
-            .h = h,
-            .alpha = alpha,
-            .l = l,
-            .mu = mu,
-            .z = z,
-        }) catch |err| {
-            allocator.free(out.c);
-            return err;
-        };
+            var out: Self = .{
+                .n = x.len,
+                .x = undefined,
+                .y = undefined,
+                .a = undefined,
+                .b = undefined,
+                .c = undefined,
+                .d = undefined,
+            };
+            @memcpy(out.x[0..x.len], x);
+            @memcpy(out.y[0..y.len], y);
 
-        return out;
-    }
+            // Scratch, on the stack, sized for the capacity rather than for `n`,
+            // since `n` is not known until now. Gone when init returns.
+            var h: [capacity - 1]f32 = undefined;
+            var alpha: [capacity - 1]f32 = undefined;
+            var l: [capacity]f32 = undefined;
+            var mu: [capacity]f32 = undefined;
+            var z: [capacity]f32 = undefined;
 
-    pub fn deinit(self: Dyn) void {
-        self.allocator.free(self.x);
-        self.allocator.free(self.y);
-        self.allocator.free(self.a);
-        self.allocator.free(self.b);
-        self.allocator.free(self.c);
-        self.allocator.free(self.d);
-    }
+            try solve(out.x[0..out.n], out.y[0..out.n], out.a[0 .. out.n - 1], out.b[0 .. out.n - 1], out.c[0..out.n], out.d[0 .. out.n - 1], .{
+                .h = h[0 .. out.n - 1],
+                .alpha = alpha[0 .. out.n - 1],
+                .l = l[0..out.n],
+                .mu = mu[0..out.n],
+                .z = z[0..out.n],
+            });
+            return out;
+        }
 
-    pub fn evaluate(self: Dyn, at: f32) f32 {
-        return evaluateSlices(self.x, self.y, self.a, self.b, self.c, self.d, at);
-    }
-};
+        pub fn evaluate(self: Self, at: f32) f32 {
+            return evaluateSlices(
+                self.x[0..self.n],
+                self.y[0..self.n],
+                self.a[0 .. self.n - 1],
+                self.b[0 .. self.n - 1],
+                self.c[0..self.n],
+                self.d[0 .. self.n - 1],
+                at,
+            );
+        }
+    };
+}
 
 // --- tests ------------------------------------------------------------------
 
@@ -445,32 +452,51 @@ test "spline: the run-time-sized form agrees with the fixed-size one" {
     const x = [_]f32{ 0, 1, 2, 3, 4 };
     const y = [_]f32{ 0, 1, 0, 1, 0 };
 
-    var dyn = try Dyn.init(std.testing.allocator, &x, &y);
-    defer dyn.deinit();
-
+    // Capacity 8, five knots in use: the count is a field, not a type parameter.
+    const bounded = try Bounded(8).init(&x, &y);
     const fixed = try Spline(5).init(x, y);
 
-    try corpus.expectValues("spline_b", &.{ dyn.b[0], dyn.b[1], dyn.b[2], dyn.b[3] });
+    try std.testing.expectEqual(@as(usize, 5), bounded.n);
+    try corpus.expectValues("spline_b", &.{ bounded.b[0], bounded.b[1], bounded.b[2], bounded.b[3] });
     for ([_]f32{ -1, 0, 0.5, 1.5, 2, 3.75, 9 }) |at| {
-        try std.testing.expectEqual(fixed.evaluate(at), dyn.evaluate(at));
+        try std.testing.expectEqual(fixed.evaluate(at), bounded.evaluate(at));
     }
 
     // The corpus values are reached through this form too, so the shared solver
     // is doing the same work on both paths.
-    try corpus.expectValue("spline_eval_between", dyn.evaluate(1.5));
+    try corpus.expectValue("spline_eval_between", bounded.evaluate(1.5));
+
+    // All of the storage is inline: the value is its arrays and the count, with no
+    // slice or pointer in it. That is what "no allocator" means concretely, and it
+    // is checkable rather than a promise - a reintroduced slice would add sixteen
+    // bytes and break the bound below.
+    const floats = 8 * 2 + // x, y - one per knot
+        7 * 3 + // a, b, d - one per interval, so capacity - 1 each
+        8; // c - one per knot
+    const fields = @sizeOf(usize) + floats * @sizeOf(f32);
+    try std.testing.expectEqual(@as(usize, 188), fields);
+    // The value is the fields plus whatever padding the alignment demands.
+    try std.testing.expect(@sizeOf(Bounded(8)) >= fields);
+    try std.testing.expect(@sizeOf(Bounded(8)) <= fields + @alignOf(Bounded(8)));
 }
 
-test "dyn spline: bad input is refused, and nothing leaks" {
-    const allocator = std.testing.allocator;
-
-    try std.testing.expectError(Error.LengthMismatch, Dyn.init(allocator, &.{ 0, 1, 2 }, &.{ 0, 1 }));
-    try std.testing.expectError(Error.TooFewPoints, Dyn.init(allocator, &.{0}, &.{0}));
-    try std.testing.expectError(Error.NotIncreasing, Dyn.init(
-        allocator,
+test "bounded spline: bad input is refused, and nothing is allocated" {
+    try std.testing.expectError(Error.LengthMismatch, Bounded(8).init(&.{ 0, 1, 2 }, &.{ 0, 1 }));
+    try std.testing.expectError(Error.TooFewPoints, Bounded(8).init(&.{0}, &.{0}));
+    try std.testing.expectError(Error.NotIncreasing, Bounded(8).init(
         &.{ 0, 1, 1, 3 },
         &.{ 0, 1, 2, 3 },
     ));
-    // std.testing.allocator fails the test if any of the above leaked.
+
+    // More knots than the capacity: refused rather than truncated or grown.
+    const too_many = [_]f32{ 0, 1, 2, 3, 4, 5 };
+    try std.testing.expectError(Error.CapacityExceeded, Bounded(4).init(&too_many, &too_many));
+
+    // The capacity is usable to the last knot.
+    const exact = [_]f32{ 0, 1, 2, 3 };
+    const full = try Bounded(4).init(&exact, &exact);
+    try std.testing.expectEqual(@as(usize, 4), full.n);
+    try std.testing.expectEqual(@as(f32, 2.0), full.evaluate(2.0));
 }
 
 test "bezier: matches the C answers" {

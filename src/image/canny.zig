@@ -271,7 +271,7 @@ pub fn edgeDetection(
     // The C mallocs `magnitude` and `direction`, the gradient below writes only
     // their interior, and suppression reads border pixels from them whenever a
     // diagonal direction at an interior pixel points at one - so the C's pipeline
-    // is not a function of its input. probe_canny_uninitialized.c gets 20 or 24
+    // is not a function of its input. probe_canny_uninitialized.c (archived) gets 20 or 24
     // set pixels from one image depending on what was in the heap, at exactly the
     // four pixels whose suppression compares against a border value.
     //
@@ -474,7 +474,7 @@ test "canny: the whole pipeline matches the C when the border is defined" {
     // The corpus holds a *staged* pipeline rather than the C's own
     // BreezeCannyEdgeDetection, because that one reads the uninitialized border of
     // its malloc'd intermediates - see the case's comment and
-    // probe_canny_uninitialized.c. The port defines the border, so it must agree
+    // the archived probe. The port defines the border, so it must agree
     // with the staged run.
     var dst = [_]u8{0xEE} ** 25;
     var blurred = [_]u8{0} ** 25;

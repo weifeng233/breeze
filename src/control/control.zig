@@ -1,7 +1,7 @@
-//! The control stage: controllers ported from `include/breeze/control/`.
-//!
-//! In progress - `pid` and `state_feedback` are done; `fuzzy`, `adaptive` and
-//! the six `platform/` controllers are not yet.
+//! The control stage: all ten controllers, ported from `include/breeze/control/`
+//! - `pid`, `state_feedback`, the six `platform/` controllers, `adaptive` and
+//! `fuzzy`. The C library is gone from this tree (see the
+//! `archive/c-algorithm-layer` branch).
 //!
 //! The controllers are stateful like the filters, but they carry more policy:
 //! output limits, anti-windup, and in one case a derivative filter that cannot

@@ -4,10 +4,11 @@
 >
 > 相关文档：[FUSION.md](FUSION.md)（融合方案）· [LIBXR-XROBOT.md](LIBXR-XROBOT.md)（调研记录）
 >
-> C 版本的算法库（`include/`、`src/`）仍然保留，作为算法层迁移的参考与对照。
-> 它已经**修好并可编译、可运行**（由 `tools/check-c.ps1` 在 CI 里守着），
-> 并且**已全部迁移到 Zig**：修复过程见 [REVIEW.md](REVIEW.md) §26，
-> 四个阶段的迁移与逐模块记录见第 8 节与 REVIEW.md §27–§49。
+> C 版本的算法库（`include/`、`src/`）曾经作为算法层迁移的参考与对照：它先被修好
+> （可编译、可运行，由 `tools/check-c.ps1` 在 CI 里守着），然后**已全部迁移到 Zig**，
+> 最后**连同那道门禁一起从主分支移除**——完整保存在 `archive/c-algorithm-layer` 分支。
+> 修复过程见 [REVIEW.md](REVIEW.md) §26，四个阶段的迁移与逐模块记录见第 8 节与
+> REVIEW.md §27–§50。
 
 ## 1. 为什么换 Zig，以及放弃了什么
 
@@ -202,8 +203,8 @@ docs/
   ARCHITECTURE.md         本文档
   FUSION.md               融合方案
   LIBXR-XROBOT.md         LibXR/XRobot 调研记录
-include/ src/             旧 C 算法库（已全部迁移到 Zig，保留作数值对照）
-applications/             基于旧 C 算法库的应用示例（同上）
+include/ src/             旧 C 算法库（已从主分支移除，见 archive/c-algorithm-layer 分支）
+applications/ tests/      旧 C 库的示例应用与通信测试（同上，一并移除）
 ```
 
 `hal.RxRing` 是 `Channel(u8, N)` 加了自带缓冲的便捷形式——框架里只有一处 SPSC 实现，
@@ -322,21 +323,23 @@ C 于是采用隐式声明——隐式 `malloc` 的返回类型是 `int`，在 6
 | control | 10 | 2375 | 4 | ✅ **已完成**（pid / state_feedback / 自适应 / fuzzy / `platform` 六个，§34–§41） |
 | image | 8 | 1878 | 72 | ✅ **已完成**（binary_threshold / otsu_threshold / sobel_operator / gaussian_blur / morphology / canny_edge / hough_transform / histogram；临时缓冲与累加器改成调用者切片，尺寸类参数在 Zig 侧是 comptime，见 §42–§48） |
 
-整套 C 层全绿：35 个头文件逐个独立编译、14 个 TU 编译、5 个示例与 2 个应用
-链接并运行、11 个通信测试（42 条断言）通过，全部在 `-Wall -Wextra -Werror` 下。
-守住它的是 `pwsh tools/check-c.ps1`——该脚本会重新测一遍上面这些数字，并与 README
-的计数比对；它需要 gcc，所以不在纯 Zig 的 `zig build ci` 里。修复过程与逐条证据见
-[REVIEW.md](REVIEW.md) 第 26 节。
+整套 C 层曾经全绿：35 个头文件逐个独立编译、14 个 TU 编译、5 个示例与 2 个应用
+链接并运行、11 个通信测试（42 条断言）通过，全部在 `-Wall -Wextra -Werror` 下，
+由 `pwsh tools/check-c.ps1` 守住（它重新测一遍这些数字并与 README 的计数比对）。
+**这套 C 与那道门禁已在迁移完成后从主分支移除**，完整保存在
+`archive/c-algorithm-layer` 分支；修复过程与逐条证据见 [REVIEW.md](REVIEW.md) 第 26 节。
 
 #### 数值对照是怎么做的
 
-"与 C 版本做数值对照"这句话必须落到机制上，否则它只是意图。现在的链条是：
+"与 C 版本做数值对照"这句话必须落到机制上，否则它只是意图。链条是：
 
 1. `tools/corpus/gen_math_corpus.c` 调用 C 实现，按 `名 值...` 打印返回值；
-2. 它的输出作为 `src/math/testdata/math_corpus.txt` 提交进仓库；
+2. 它的输出作为 `src/math/testdata/math_corpus.txt` 提交进仓库（556 条用例）；
 3. `src/math/corpus.zig` 在测试里解析它，移植后的每个函数逐条比对；
-4. `tools/check-c.ps1` 重新生成一份并与提交的副本比对——**语料漂了就红**，
-   这样 Zig 测试不会一直对着"昨天的答案"通过。比对是**数值**的（用例名与值的个数
+4. 曾经还有一步：`tools/check-c.ps1` 重新生成一份并与提交的副本比对——**语料漂了就红**。
+   这一步随 C 一起移除，所以**语料现在是冻结的回归基线，不再是活的对照物**：
+   它不能再被重新生成，改了行为就要自己决定那条用例怎么办。这是有意的摩擦力，
+   `corpus.zig` 的文件头写明了这件事。当初比对是**数值**的（用例名与值的个数
    要求完全一致，值按 1e-6 相对容差比），因为 C 库自己的超越函数结果在不同 libm 上
    **并不逐位相同**：`quat_euler_roundtrip` 在 Windows 上是 `1.10000002`、在 glibc 上是
    `1.10000014`，相差 1 ulp。这一条是 CI 在 Linux runner 上抓到的，不是推测；检查会把
@@ -362,6 +365,10 @@ C 于是采用隐式声明——隐式 `malloc` 的返回类型是 `int`，在 6
 * `Program` 只表达"步骤序列 + 条件跳转"，**无法表达数据依赖的循环边界**（例如"直到数组耗尽"）。
   这类逻辑仍需写成 `call_until` 谓词或普通函数。
 * 单个任务不让出会独占循环；用 `worstLateness()` / `totalResyncs()` 检测。
+* **语料是冻结的**。算法层的 556 条对照值来自已移除的 C 实现（第 8 节），
+  现在既不能重新生成、也没有第二个实现可以互相验证。它作为回归基线仍然有效
+  （今天每个算法测试都在核对它），但它不能证明"两个实现一致"——那个能力随 C 一起
+  归档到了 `archive/c-algorithm-layer` 分支。要恢复它就把那个分支取回来。
 * 遥测帧的 CRC 多项式未与 LibXR 源码核对，见 [FUSION.md](FUSION.md) §9。
 
 

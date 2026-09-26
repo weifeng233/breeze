@@ -1,4 +1,6 @@
-//! The filter stage: stateful signal filters, ported from `include/breeze/filter/`.
+//! The filter stage: all five stateful signal filters, ported from
+//! `include/breeze/filter/`. The C library is gone from this tree (see the
+//! `archive/c-algorithm-layer` branch).
 //!
 //! Unlike the math modules these hold state and are updated in place, so the
 //! ports take `self: *Self`. The C null checks have no counterpart (there is no

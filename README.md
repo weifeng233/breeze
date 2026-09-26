@@ -6,13 +6,14 @@
 > **状态**：内核与模块系统已实现。`zig build ci` 通过：**109 个内核单元测试**、**14 个应用测试**、
 > **136 个算法测试**、**7 个目标交叉编译**（CYT2BL3、CYT4BB7 的 CM0+ 与 CM7、RT1064 各有一个具名目标）。
 > 这些数字由 CI 校验，不允许漂移（见 `.github/workflows/ci.yml`）。
-> **C 算法层**（`include/`、`src/`）保留为迁移到 Zig 时的对照实现，已经修好：
-> **35 个头文件**、**5 个示例**、**2 个应用**、**11 个通信测试（42 条断言）**，
-> 全部在 `-Wall -Wextra -Werror` 下编译，示例与应用链接后可直接运行。
-> 这道检查由 `pwsh tools/check-c.ps1` 执行——它需要 gcc，因此不在纯 Zig 的
-> `zig build ci` 里；上面这几个数由它逐项核对。这套 C 算法库**已全部迁移到 Zig**
-> （四个阶段 27 个模块，见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §8），
-> 保留它是为了让**每一个移植后的函数都能与它逐值对照**。
+>
+> **算法层已全部迁移到 Zig**：四个阶段 27 个模块（[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §8），
+> **零分配**——没有一处 `malloc`，也没有一处 `std.mem.Allocator`。
+> 原来的 C 实现（35 个头文件、示例、应用、通信测试与它那道 gcc 门禁）在迁移完成后
+> **已从主分支移除**，完整保存在 **`archive/c-algorithm-layer` 分支**上；
+> 迁移过程与逐条发现见 [docs/REVIEW.md](docs/REVIEW.md) §26–§50。
+> 它的 556 条答案留了下来，作为 `src/math/testdata/math_corpus.txt`：**不再重新生成，
+> 只做比对**——今天每一个算法测试仍在逐值核对它。
 
 ## 设计要点
 
@@ -216,7 +217,7 @@ RT1064 与 CYT4BB7 的 CM7 核三元组完全相同，因此二者共享同一�
 
 | 文档 | 内容 |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 设计决策、调度语义、中断规则、指令集、实测数据、迁移计划 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 设计决策、调度语义、中断规则、指令集、实测数据、算法层迁移记录 |
 | [docs/FUSION.md](docs/FUSION.md) | 与 LibXR/XRobot 及 Smartcar-Template 的融合方案 |
 | [docs/LIBXR-XROBOT.md](docs/LIBXR-XROBOT.md) | LibXR/XRobot 技术调研（外部资料核对记录） |
 | [docs/REVIEW.md](docs/REVIEW.md) | 评审处理记录：外部评审逐条处理（采纳/驳回附证据/推迟），以及一次全项目自审 |
@@ -238,7 +239,7 @@ RT1064 与 CYT4BB7 的 CM7 核三元组完全相同，因此二者共享同一�
 
 ## 许可证
 
-[MIT](LICENSE)。`include/`、`src/` 下的 C 算法库是同一许可证下的历史代码。
+[MIT](LICENSE)。已移除的 C 算法库（见 `archive/c-algorithm-layer` 分支）是同一许可证下的历史代码。
 
 本项目参考了 [LibXR](https://github.com/Jiu-xiao/libxr) 与
 [XRobot](https://github.com/xrobot-org) 的架构设计（均为 Apache-2.0），

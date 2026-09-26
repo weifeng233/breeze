@@ -108,19 +108,3 @@ jobs:
       - name: README's cost table must match the images
         run: pwsh -NoProfile -File tools/sizes.ps1
 
-      # The C algorithm layer is not part of `zig build ci` - it is C, and the
-      # Zig build never touches it - so nothing looked at it, and it had rotted
-      # to the point where any file that included `breeze/breeze.h` failed to
-      # compile. Seven headers also called malloc/free/fabsf/sqrtf/expf without
-      # including <stdlib.h>/<math.h>; on a 64-bit host an implicitly declared
-      # malloc returns `int` and truncates the pointer, so those files compiled
-      # and then computed the wrong answer.
-      #
-      # tools/check-c.ps1 discovers the files instead of listing them, compiles
-      # every header standalone under -Werror, compiles every translation unit,
-      # links and runs every example and application (the two applications are
-      # interactive, so `q` is fed in under a timeout), runs the comm test suite,
-      # and compares all four counts with README.md.
-      - name: C layer must compile, link and run
-        run: pwsh -NoProfile -File tools/check-c.ps1
-

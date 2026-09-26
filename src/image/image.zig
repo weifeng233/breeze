@@ -1,20 +1,26 @@
 //! The image stage: 8-bit grayscale processing ported from
-//! `include/breeze/image/`.
+//! `include/breeze/image/` - all eight headers, and the C library itself is gone
+//! from this tree (see the `archive/c-algorithm-layer` branch).
 //!
-//! In progress - the two allocation-free threshold headers are done; the
-//! filters, morphology, Canny, Hough and histogram are not yet.
-//!
-//! This is the first stage whose functions do not own their memory. The C
-//! versions take a source and a destination and use `width`, `height` and
-//! `stride_bytes` to walk them, checking the pointers but never the sizes;
-//! `common.zig` adds the size check back, and everything here returns
+//! Every function here takes its memory from the caller, and none of them
+//! allocate. The C versions take a source and a destination and use `width`,
+//! `height` and `stride_bytes` to walk them, checking the pointers but never the
+//! sizes; `common.zig` adds the size check back, and everything here returns
 //! `common.Error` instead of silently returning. Where C returns 0 for both
 //! "the answer is 0" and "your arguments were nonsense", the error union is the
 //! only thing that tells those apart.
 //!
-//! The remaining headers allocate scratch buffers through the caller's allocator;
-//! those will take their scratch as a caller-provided slice, the way the filter
-//! stage does, so nothing in this stage allocates.
+//! The C allocated scratch in four of these modules - `sobel`'s threshold buffer,
+//! `gaussian`'s kernel and temporary, `morphology`'s two, Canny's six and Hough's
+//! accumulators. All of it is a caller-provided slice now (checked, so too small
+//! is an error rather than an overrun), and the sizes that were runtime arguments
+//! - Gaussian's kernel size, the structuring element - are comptime parameters.
+//!
+//! Two things in this stage are deliberately *not* the C's behaviour, both because
+//! there was nothing to reproduce: Canny's pipeline no longer reads the
+//! uninitialised border of its intermediates (docs/REVIEW.md §46), and CLAHE no
+//! longer walks off the front of its lookup table when a tile count is one (§48).
+//! Each is recorded in the function that changed.
 
 const std = @import("std");
 

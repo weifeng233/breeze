@@ -17,7 +17,7 @@
 //!   * **One tile along an axis is a crash in the C.** The interpolation pulls
 //!     `ty_i` back with `ty_i = tile_count_y - 2` when `ty_i >= tile_count_y - 1`,
 //!     which is -1 when there is only one row of tiles, and the next line reads
-//!     `luts[-1]`. `tools/corpus/probe_clahe_single_tile.c` reproduces it: a 6x4
+//!     `luts[-1]`. The archived `probe_clahe_single_tile.c` reproduces it: a 6x4
 //!     image with a tile size of 6 dies with an access violation. A caller reaches
 //!     this by passing a tile size at or above the image size - something the
 //!     function's own clamping makes ordinary. There is no behaviour to reproduce
@@ -435,7 +435,7 @@ test "histogram: CLAHE matches the C on the tile grids the C survives" {
 }
 
 test "histogram: one tile is handled, where the C reads before its table" {
-    // probe_clahe_single_tile.c: a 6x4 image with a tile size of 6 dies with an
+    // the archived probe_clahe_single_tile.c: a 6x4 image with a tile size of 6 dies with an
     // access violation, because the interpolation computes `tile_count - 2` for
     // the y axis, which is -1. There is no behaviour to reproduce, so the port
     // uses the tile it has.

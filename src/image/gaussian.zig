@@ -14,7 +14,7 @@
 //!   * An even kernel slice passed to the 1-D filters is `error.EvenKernelSize`.
 //!     The C reads one float past the end of the kernel for such a size - the
 //!     loop runs `-size/2 .. +size/2`, which is `size + 1` taps - and
-//!     tools/corpus/probe_gaussian.c shows that read happening by changing the
+//!     the archived tools/corpus/probe_gaussian.c shows that read by changing the
 //!     float that lands there. There is nothing to reproduce faithfully, so the
 //!     port refuses instead (docs/REVIEW.md §44).
 
@@ -349,7 +349,7 @@ test "gaussian blur: the auto size rule matches the C's outputs" {
     try std.testing.expectEqualSlices(u8, &dot, &out);
 
     // A narrow sigma is invisible in 8 bits: the corpus records this as the
-    // identity, and probe_gaussian.c shows that no sigma reaching the `< 3` floor
+    // identity, and the archived probe shows that no sigma reaching the `< 3` floor
     // can look any different. So these two cases do not pin the floor.
     try blurSized(&dot, &out, &temp, &scratch, 4, 4, 0.2, 0, 0);
     try expectBytes(&corpus, "gaussian_blur_auto_narrow_sigma_0p2", &out);
@@ -441,7 +441,7 @@ test "gaussian blur: the byte clamp is reached, and saturates at 255" {
 
 test "gaussian: an even kernel is refused where the C reads past the end" {
     // The C's 1-D filters loop `-size/2 .. +size/2`, which is one tap more than an
-    // even-sized kernel holds; probe_gaussian.c changes the float that lands in
+    // even-sized kernel holds; the archived probe changes the float that lands in
     // that slot and the output changes with it.
     var even_kernel = [_]f32{ 0.0, 0.5, 0.5, 0.0 };
     var out: [16]u8 = undefined;

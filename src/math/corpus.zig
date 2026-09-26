@@ -1,17 +1,23 @@
-//! Reads `testdata/math_corpus.txt`: the answers the C library gave.
+//! Reads `testdata/math_corpus.txt`: a frozen record of what the C library
+//! answered, captured before that library was retired.
 //!
 //! ARCHITECTURE.md §8 says each migrated module is checked against the C version
-//! it replaces. This file is what makes that a fact rather than an intention.
-//! The chain is:
+//! it replaced. That is what this file holds: 556 cases, produced by
+//! `tools/corpus/gen_math_corpus.c` running the C code and printing its return
+//! values, and compared case by case by every ported module.
 //!
-//!   `tools/corpus/gen_math_corpus.c` runs the C code and prints what it
-//!   returned; its output is committed as `testdata/math_corpus.txt`;
-//!   `tools/check-c.ps1` re-runs the generator and fails if the committed copy
-//!   no longer matches it; and the ported modules compare against the file case
-//!   by case.
+//! **The C library and its generator are no longer in the tree** - they were
+//! removed once the migration finished, and preserved on the
+//! `archive/c-algorithm-layer` branch (docs/REVIEW.md §50). So the corpus is now a
+//! *regression baseline* rather than a live oracle: it cannot be regenerated, and
+//! that is a real difference worth knowing before trusting it. What it still gives
+//! is the strongest thing it ever gave - a set of numbers nobody wrote by hand,
+//! fixed at the moment the reference implementation was measured, that every
+//! current answer must still reproduce.
 //!
-//! So a drifting oracle is a red build, and a test comparing against the wrong
-//! numbers cannot pass quietly.
+//! Deliberately changing a ported function is therefore a two-part act: change the
+//! code, and decide what to do about the case that pins the old answer. That is
+//! the intended friction, not an obstacle.
 //!
 //! There is no allocator here on purpose. A corpus line holds at most four
 //! floats, so a fixed table holds the whole file and a lookup is a short linear
