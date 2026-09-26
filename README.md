@@ -147,8 +147,8 @@ pwsh tools/vendor.ps1 -Dest ../my-project/lib/breeze -Check
 复制的是 `src/breeze_kernel.zig`（只含内核与 `app.zig`，不含平台后端），
 使用者自己提供 `now` / `criticalEnter` / `criticalExit` 三个函数。
 
-[Smartcar-Template](https://github.com/weifeng233/Smartcar-Template) 的 cyt2bl3 模板
-就是这样接入的：S0 里程碑实测，**Zig 目标文件占用的 RAM 从 404 B 降到 72 B**
+Smartcar-Template 的 cyt2bl3 模板就是这样接入的（该模板仓库目前是私有的，
+所以这里不给链接）：S0 里程碑实测，**Zig 目标文件占用的 RAM 从 404 B 降到 72 B**
 （同一批固件的整机 `.bss` 从 3624 B 降到 3288 B）；过程与数据见
 [docs/FUSION.md](docs/FUSION.md) §7。
 
