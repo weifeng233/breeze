@@ -6,7 +6,7 @@
 # reason, not a regeneration.
 # format: <case> <value>...
 # Most values are the C generator's %.9g. The ones re-locked when a deliberate
-# behaviour change moved them (REVIEW §51-§53) are Zig's shortest round-trip
+# behaviour change moved them (REVIEW §51-§55) are Zig's shortest round-trip
 # decimal. Both parse back to the same f32, which is what the comparison needs.
 vec2_layout 8 4
 vec3_layout 12 4
@@ -535,14 +535,14 @@ canny_hysteresis_chain_backward 0 0 0 0 0 0 0 0 0 0 0 0 255 255 0 0 0 0 0 0 0 0 
 canny_staged_edges 0 0 0 0 0 0 255 255 255 0 0 255 0 0 0 0 255 0 255 0 0 0 0 0 0
 canny_staged_edges_sigma_0p5 0 0 0 0 0 0 255 0 0 0 0 0 255 255 0 0 0 255 255 0 0 0 0 0 0
 canny_edges_5x5_all_below 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-hough_lines_cross 8 -2 2.72271371 4 -2 2.7401669 4 -2 2.84488654 4 -2 2.86233997 4 -2 2.87979317 4 -2 2.91469979 5 -2 2.93215322 5 -2 2.94960642 5
+hough_lines_cross 8 -2 2.984513 4 -2 3.0019662 4 -2 3.0368729 5 -2 3.054326 5 -2 3.0717795 5 -2 3.0892327 5 -2 3.106686 5 -2 3.1241393 5
 hough_lines_threshold_at_peak 0
 hough_lines_blank 0
-hough_lines_capped_at_1 1 -2 2.72271371 4
-hough_lines_vertical_only 4 -2 2.84488654 4 -2 2.86233997 4 -2 2.87979317 4 -2 2.91469979 5
+hough_lines_capped_at_1 1 -2 2.984513 4
+hough_lines_vertical_only 4 -2 2.984513 4 -2 3.0019662 4 -2 3.0368729 5 -2 3.054326 5
 hough_lines_vertical_at_peak 0
-hough_lines_horizontal_only 4 1 1.58824956 5 1 1.60570288 5 1 1.62315619 5 1 1.6406095 5
-hough_lines_long_vertical 4 -5 3.05432606 11 -5 3.07177949 11 -5 3.08923268 11 -5 3.10668612 11
+hough_lines_horizontal_only 4 2 1.3962634 4 2 1.4137167 4 2 1.4486233 5 2 1.4660766 5
+hough_lines_long_vertical 5 -5 3.106686 11 -5 3.1241393 11 5 0 11 5 0.017453292 11 5 0.034906585 11
 hough_draw_vertical 238 238 255 238 238 238 238 255 238 238 238 238 255 238 238 238 238 255 238 238 238 238 255 238 238
 hough_draw_horizontal 238 238 238 238 238 238 238 238 238 238 255 255 255 255 255 238 238 238 238 238 238 238 238 238 238
 hough_draw_oblique 238 238 238 238 255 238 238 238 255 238 238 238 255 238 238 238 255 238 238 238 255 238 238 238 238

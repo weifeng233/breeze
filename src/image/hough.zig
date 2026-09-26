@@ -8,22 +8,27 @@
 //! C's partially-failed-allocation cleanup paths disappear with it, since there
 //! is nothing left to fail.
 //!
-//! Three behaviours of the C are worth naming before the code, because none of
-//! them are visible from the signatures:
+//! Three of the C's behaviours were defects and are fixed here; docs/REVIEW.md
+//! §55 records each one with the C's old values, because the corpus used to pin
+//! them (`hough_lines_cross`, `hough_lines_vertical_only`,
+//! `hough_lines_horizontal_only`, `hough_lines_long_vertical`):
 //!
-//!   * **theta = 0 and theta = 179 degrees are unreachable.** The peak scan runs
-//!     `j` from 1 to `theta_count - 2`, so those two columns are never candidates.
-//!     A vertical line's votes pile up in the first of them, and what gets
-//!     reported instead are the near-boundary bins that happen to collect the same
-//!     pixels - the line, rotated by the width of that band. The corpus records
-//!     both halves (`hough_lines_vertical_only` and
-//!     `hough_lines_vertical_at_peak`, which finds nothing).
-//!   * **A reported rho is truncated, not rounded.** The bin index is
-//!     `(int)(rho + diagonal)`, so the horizontal-line case reports rho 1 where
-//!     the line is at 2.
+//!   * **theta = 0 and theta = 179 degrees were unreachable.** The C's peak scan
+//!     ran `j` from 1 to `theta_count - 2`, so those two columns were never
+//!     candidates. A vertical line's votes pile up in the first of them, and what
+//!     came back instead were the near-boundary bins collecting the same pixels -
+//!     the line, rotated by the width of that band. Every column is scanned now.
+//!     With a small output cap the answer can still be that twin, but only because
+//!     rho is the outer loop and the twin sits at a smaller rho index - not
+//!     because the peak is invisible, which is what the wide-cap assertions in the
+//!     tests separate.
+//!   * **A reported rho was truncated, not rounded.** The bin index was
+//!     `(int)(rho + diagonal)`, so the horizontal-line case reported rho 1 where
+//!     the line is at 2. The nearest bin is used now.
 //!   * **Both scans stop early on a cap**, and the order they stop in is rho
 //!     before theta for lines and x before y before radius for circles - so a cap
-//!     keeps whichever maximum comes first in that order, not the strongest.
+//!     keeps whichever maximum comes first in that order, not the strongest. That
+//!     one is the caller's contract, not a defect, and is unchanged.
 //!
 //! The C's two `calloc`s are the reason nothing here reads uninitialized memory,
 //! unlike the Canny pipeline (docs/REVIEW.md §46). The port keeps that by zeroing
@@ -121,11 +126,14 @@ pub fn houghLines(
                 const rho = @as(f32, @floatFromInt(x)) * @cos(theta) +
                     @as(f32, @floatFromInt(y)) * @sin(theta);
 
-                // The C adds the diagonal *before* truncating: `(int)(rho + diagonal)`.
-                // Truncating rho first and then adding would move every negative rho
-                // into the next bin down - by one, which is exactly the size of the
-                // error this is written to avoid.
-                const rho_idx = toI64(rho + @as(f32, @floatFromInt(rho_count / 2)));
+                // Round to the nearest rho bin; the C floored. `(int)(rho + diagonal)`
+                // on a non-negative sum *is* a floor, and it put a line whose pixels
+                // measured rho 1.93 into the bin that reports 1, so a horizontal line
+                // at y = 2 came back as rho 1. The diagonal offset stays, because it
+                // is what makes a negative rho indexable at all - and it has to be
+                // applied to the rounded value, since rounding after the offset would
+                // round the offset too.
+                const rho_idx = toI64(@round(rho)) + @as(i64, @intCast(rho_count / 2));
 
                 if (rho_idx >= 0 and rho_idx < rho_count) {
                     table[@as(usize, @intCast(rho_idx)) * theta_count + i] += 1;
@@ -135,11 +143,14 @@ pub fn houghLines(
     }
 
     var line_count: usize = 0;
-    // `j` from 1 to theta_count - 2: the first and last theta columns are never
-    // candidates, which is the quirk the module comment describes.
-    for (1..rho_count - 1) |i| {
+    // The whole accumulator is scanned now, and the neighbourhood is taken with the
+    // two axes treated as what they are: `rho` is bounded, so its index is clamped;
+    // `theta` is an orientation with period 180 degrees, so its index wraps. The C
+    // ran `j` from 1 to `theta_count - 2`, which made theta = 0 and theta = 179
+    // unreachable - and a vertical line's votes pile up in the first of those.
+    for (0..rho_count) |i| {
         if (line_count == lines.len) break;
-        for (1..theta_count - 1) |j| {
+        for (0..theta_count) |j| {
             if (line_count == lines.len) break;
 
             const value = table[i * theta_count + j];
@@ -149,8 +160,16 @@ pub fn houghLines(
             for (0..3) |ni| {
                 for (0..3) |nj| {
                     if (ni == 1 and nj == 1) continue;
-                    const neighbour = (i + ni - 1) * theta_count + (j + nj - 1);
-                    if (table[neighbour] > value) is_max = false;
+
+                    const neighbour_rho = std.math.clamp(
+                        @as(isize, @intCast(i)) + @as(isize, @intCast(ni)) - 1,
+                        0,
+                        @as(isize, @intCast(rho_count - 1)),
+                    );
+                    const neighbour_theta = (j + nj + theta_count - 1) % theta_count;
+                    if (table[@as(usize, @intCast(neighbour_rho)) * theta_count + neighbour_theta] > value) {
+                        is_max = false;
+                    }
                 }
             }
 
@@ -394,10 +413,14 @@ fn expectLines(corpus: *const corpus_mod.Corpus, name: []const u8, lines: []cons
     try std.testing.expectEqual(@as(usize, 1 + count * 3), values.len);
 
     for (lines[0..count], 0..) |line, i| {
-        try corpus.expectClose(name, 1 + i * 3, values[1 + i * 3], line.rho);
-        try corpus.expectClose(name, 2 + i * 3, values[2 + i * 3], line.theta);
-        try std.testing.expectEqual(@as(i32, @intFromFloat(values[3 + i * 3])), line.votes);
+        try compareLine(corpus, name, values, line, i);
     }
+}
+
+fn compareLine(corpus: *const corpus_mod.Corpus, name: []const u8, values: []const f32, line: Line, i: usize) !void {
+    try corpus.expectClose(name, 1 + i * 3, values[1 + i * 3], line.rho);
+    try corpus.expectClose(name, 2 + i * 3, values[2 + i * 3], line.theta);
+    try std.testing.expectEqual(@as(i32, @intFromFloat(values[3 + i * 3])), line.votes);
 }
 
 fn expectCircles(corpus: *const corpus_mod.Corpus, name: []const u8, circles: []const Circle, count: usize) !void {
@@ -450,7 +473,7 @@ test "hough lines: the cross, the cap, and the blank image" {
     try std.testing.expectEqual(@as(usize, 0), try houghLines(&cross, &[_]Line{}, &accumulator, 5, 5, 3, 0));
 }
 
-test "hough lines: theta 0 is unreachable, so a vertical line is found rotated" {
+test "hough lines: the vertical, the horizontal, and the columns theta 0 and 179" {
     const corpus = try corpus_mod.Corpus.load();
 
     var vertical = [_]u8{0} ** 25;
@@ -466,38 +489,105 @@ test "hough lines: theta 0 is unreachable, so a vertical line is found rotated" 
     var count = try houghLines(&vertical, &lines, &accumulator, 5, 5, 3, 0);
     try expectLines(&corpus, "hough_lines_vertical_only", &lines, count);
 
-    // Every line reported for a vertical line has a theta nowhere near 0: the
-    // column that holds its peak is never examined, so the answer is the same
-    // pixels collected in a bin at the edge of the reachable range.
+    // Four lines and every one of them at the far end of the range: with a cap
+    // this small the answer is the near-180 twin of the peak, which holds the same
+    // five pixels. That is scan order, not invisibility - rho is the outer loop and
+    // the twin is at rho -2, so the cap is full before the scan reaches the peak at
+    // rho +2. The wide-cap call below separates the two.
     for (lines[0..count]) |line| {
         try std.testing.expect(line.theta > 2.8);
         try std.testing.expect(line.theta < 3.14159265);
     }
 
-    // At the peak's own vote count the answer is empty.
+    // Raise the cap and the peak is there, at one of the two columns the C never
+    // examined: theta = 0, rho = 2, all five pixels.
+    var wide: [64]Line = undefined;
+    const wide_count = try houghLines(&vertical, &wide, &accumulator, 5, 5, 3, 0);
+    var found_theta_zero = false;
+    for (wide[0..wide_count]) |line| {
+        if (line.theta == 0.0 and line.rho == 2.0 and line.votes == 5) found_theta_zero = true;
+    }
+    try std.testing.expect(found_theta_zero);
+
+    // At the peak's own vote count the answer is empty either way: the comparison
+    // is strictly `>`.
     count = try houghLines(&vertical, &lines, &accumulator, 5, 5, 5, 0);
     try expectLines(&corpus, "hough_lines_vertical_at_peak", &lines, count);
     try std.testing.expectEqual(@as(usize, 0), count);
 
-    // The same line rotated is found - at rho 1, not 2, because the bin index
-    // truncates.
+    // The same line rotated is found at rho 2 - the line's own distance, because
+    // the bin is now the nearest one. The C reported 1: at theta = 80 degrees the
+    // five pixels measure rho 1.97 to 2.66, and its floor put all of them in the
+    // bin below. Four of them are in the nearest bin and the fifth rounds up to 3,
+    // which is why the first line here has four votes rather than five - the same
+    // spread the floor collapsed into one bin, one bin too low.
     count = try houghLines(&horizontal, &lines, &accumulator, 5, 5, 3, 0);
     try expectLines(&corpus, "hough_lines_horizontal_only", &lines, count);
-    try std.testing.expectEqual(@as(f32, 1.0), lines[0].rho);
-    try std.testing.expectEqual(@as(i32, 5), lines[0].votes);
+    try std.testing.expectEqual(@as(f32, 2.0), lines[0].rho);
+    try std.testing.expectEqual(@as(i32, 4), lines[0].votes);
 
-    // A long vertical line makes the unreachable column the *only* one above the
-    // threshold: at theta = 0 all eleven pixels vote into one bin, while the
-    // reachable columns split them (at 1 degree it is ten and one, and ten is not
-    // greater than ten). What comes back instead are the four columns at the far
-    // end of the reachable range - the line itself is nowhere in the answer.
+    // A long vertical line, at a threshold only its peak clears: at theta = 0 all
+    // eleven pixels land in one bin, while one degree away it is ten and one, and
+    // ten is not greater than ten. The answer now *contains* that line - the C's
+    // four lines were all the rho -5 twin, and the peak was nowhere in the answer.
     var tall = [_]u8{0} ** 121;
     for (0..11) |i| tall[i * 11 + 5] = 255;
     var tall_lines: [5]Line = undefined;
     const tall_count = try houghLines(&tall, &tall_lines, &accumulator, 11, 11, 10, 0);
     try expectLines(&corpus, "hough_lines_long_vertical", &tall_lines, tall_count);
-    for (tall_lines[0..tall_count]) |line| try std.testing.expect(line.theta > 3.0);
-    try std.testing.expect(tall_count < 5);
+
+    var found_tall_peak = false;
+    for (tall_lines[0..tall_count]) |line| {
+        if (line.theta == 0.0 and line.rho == 5.0 and line.votes == 11) found_tall_peak = true;
+    }
+    try std.testing.expect(found_tall_peak);
+    // The other four are the twin again, and the cap is now exactly full: the
+    // rounding change is why there are only two of them rather than the C's four.
+    try std.testing.expectEqual(@as(usize, 5), tall_count);
+    var twins: usize = 0;
+    for (tall_lines[0..tall_count]) |line| {
+        if (line.rho == -5.0) {
+            twins += 1;
+            try std.testing.expect(line.theta > 3.0);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), twins);
+}
+
+test "hough lines: theta is an orientation, so 0 and 179 are neighbours" {
+    // Fixing the scan range raises a question the C never had to answer: is the bin
+    // at theta = 0 a maximum? Its neighbour across the seam is at theta = 179, and
+    // whether that one is compared decides the answer. This fixture makes the two
+    // differ by a single pixel.
+    //
+    // Five pixels in the x = 0 column land in the rho = 0 bin at *both* ends of the
+    // range, because x = 0 leaves rho = y * sin(theta) and y = 0..4 stays inside
+    // half a bin of zero at either end. One more pixel, at x = 1, y = 29, measures
+    // rho = -0.494 at 179 degrees - it rounds into that same bin - while at 0
+    // degrees it measures 1. So the bin at 179 holds six votes and the one at 0
+    // holds five, and at 0 degrees the seam neighbour is strictly larger.
+    var src = [_]u8{0} ** (5 * 30);
+    for (0..5) |y| src[y * 5] = 255;
+    src[29 * 5 + 1] = 255;
+
+    var accumulator: [64 * theta_count]i32 = undefined;
+    var lines: [96]Line = undefined;
+    const count = try houghLines(&src, &lines, &accumulator, 5, 30, 4, 0);
+
+    var at_zero = false;
+    var at_178 = false;
+    var at_179 = false;
+    for (lines[0..count]) |line| {
+        if (line.rho != 0.0) continue;
+        if (line.theta == 0.0) at_zero = true;
+        if (line.theta == @as(f32, 178.0) * theta_step and line.votes == 6) at_178 = true;
+        if (line.theta == @as(f32, 179.0) * theta_step and line.votes == 6) at_179 = true;
+    }
+    // Compared against its seam neighbour, the five-vote bin is not a maximum...
+    try std.testing.expect(!at_zero);
+    // ...while the six-vote bin is, and so is its equal neighbour one degree in.
+    try std.testing.expect(at_178);
+    try std.testing.expect(at_179);
 }
 
 test "hough draw: vertical, horizontal and oblique clipping match the C" {

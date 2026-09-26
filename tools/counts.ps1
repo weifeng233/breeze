@@ -9,6 +9,12 @@
 #   pwsh tools/counts.ps1                       # zig from PATH
 #   pwsh tools/counts.ps1 -Zig C:\path\to\zig  # or an explicit one
 #
+# The fifth row is the frozen corpus's case count, which was *found* stale while
+# writing REVIEW §55: the README and both ARCHITECTURE mentions still said 556 after
+# three cases had been deleted. It is checked in all three places for the same
+# reason the others are - a number restated in prose rots, and fixing it by hand
+# only schedules the next drift.
+#
 # It exists as a script rather than inline YAML because of how it failed first: a
 # round added four algorithm tests and forgot the README line, and the only thing
 # that noticed was CI - one push later. Every other gate in this repo
@@ -30,6 +36,8 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $readme = Join-Path $repoRoot 'README.md'
+$architecture = Join-Path $repoRoot 'docs/ARCHITECTURE.md'
+$corpus = Join-Path $repoRoot 'src/math/testdata/math_corpus.txt'
 
 Push-Location $repoRoot
 try {
@@ -60,22 +68,30 @@ try {
     $targets = @($targetSummary -split "`n" |
         Where-Object { $_ -match '^\+- compile obj breeze_fw_' }).Count
 
-    $text = Get-Content -Raw $readme
+    $readmeText = Get-Content -Raw $readme
+    $architectureText = Get-Content -Raw $architecture
+
+    # The corpus holds one case per line; its header is the only thing commented out.
+    $corpusCases = @(Get-Content $corpus | Where-Object { $_ -notmatch '^\s*#' -and $_.Trim() -ne '' }).Count
+
     function Get-Claim {
-        param([string]$Pattern, [string]$What)
-        $match = [regex]::Match($text, $Pattern)
-        if (-not $match.Success) { throw "could not parse README's $What claim" }
+        param([string]$Text, [string]$Pattern, [string]$What)
+        $match = [regex]::Match($Text, $Pattern)
+        if (-not $match.Success) { throw "could not parse the $What claim" }
         return [int]$match.Groups[1].Value
     }
 
     $rows = @(
-        @{ Name = 'kernel tests';     Claim = Get-Claim '\*\*(\d+) 个内核单元测试\*\*' 'kernel test'; Measured = $kernel }
-        @{ Name = 'application tests'; Claim = Get-Claim '\*\*(\d+) 个应用测试\*\*' 'application test'; Measured = $app }
-        @{ Name = 'algorithm tests';  Claim = Get-Claim '\*\*(\d+) 个算法测试\*\*' 'algorithm test'; Measured = $algorithms }
-        @{ Name = 'targets';          Claim = Get-Claim '\*\*(\d+) 个目标交叉编译\*\*' 'target'; Measured = $targets }
+        @{ Name = 'kernel tests';     Claim = Get-Claim $readmeText '\*\*(\d+) 个内核单元测试\*\*' 'README kernel test'; Measured = $kernel }
+        @{ Name = 'application tests'; Claim = Get-Claim $readmeText '\*\*(\d+) 个应用测试\*\*' 'README application test'; Measured = $app }
+        @{ Name = 'algorithm tests';  Claim = Get-Claim $readmeText '\*\*(\d+) 个算法测试\*\*' 'README algorithm test'; Measured = $algorithms }
+        @{ Name = 'targets';          Claim = Get-Claim $readmeText '\*\*(\d+) 个目标交叉编译\*\*' 'README target'; Measured = $targets }
+        @{ Name = 'corpus (README)';  Claim = Get-Claim $readmeText '它的 (\d+) 条答案' 'README corpus'; Measured = $corpusCases }
+        @{ Name = 'corpus (ARCH §8)'; Claim = Get-Claim $architectureText '提交进仓库（(\d+) 条用例）' 'ARCHITECTURE corpus'; Measured = $corpusCases }
+        @{ Name = 'corpus (ARCH §9)'; Claim = Get-Claim $architectureText '算法层的 (\d+) 条对照值' 'ARCHITECTURE limitation'; Measured = $corpusCases }
     )
 
-    Write-Output ("{0,-20} {1,10} {2,10}   {3}" -f 'count', 'README', 'measured', 'result')
+    Write-Output ("{0,-20} {1,10} {2,10}   {3}" -f 'count', 'claimed', 'measured', 'result')
     $failures = 0
     foreach ($row in $rows) {
         $ok = $row.Claim -eq $row.Measured
@@ -85,13 +101,13 @@ try {
 
     if ($failures -gt 0) {
         Write-Output ''
-        Write-Output "README's status line no longer matches what the build produces."
-        Write-Output 'Update the number in README.md (twice, if it is also in the command list).'
+        Write-Output 'A documented count no longer matches what the repository produces.'
+        Write-Output 'Update it in README.md (twice, if it is also in the command list) or in docs/ARCHITECTURE.md.'
         exit 1
     }
 
     Write-Output ''
-    Write-Output "README's counts match reality."
+    Write-Output "Every documented count matches reality."
 } finally {
     Pop-Location
 }
