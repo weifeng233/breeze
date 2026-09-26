@@ -10,8 +10,9 @@
 > **35 个头文件**、**5 个示例**、**2 个应用**、**11 个通信测试（42 条断言）**，
 > 全部在 `-Wall -Wextra -Werror` 下编译，示例与应用链接后可直接运行。
 > 这道检查由 `pwsh tools/check-c.ps1` 执行——它需要 gcc，因此不在纯 Zig 的
-> `zig build ci` 里；上面这几个数由它逐项核对。它**尚未迁移**，计划见
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 第 8 节。
+> `zig build ci` 里；上面这几个数由它逐项核对。这套 C 算法库**已全部迁移到 Zig**
+> （四个阶段 27 个模块，见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §8），
+> 保留它是为了让**每一个移植后的函数都能与它逐值对照**。
 
 ## 设计要点
 
