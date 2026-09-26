@@ -162,59 +162,8 @@ pub fn DifferentialDrive(comptime Platform: type) type {
 
 // --- tests ------------------------------------------------------------------
 
-/// A platform that records what it was told, so the commands a run produces can
-/// be compared with the C version's. The encoder counts are the same scripted
-/// sequence `tools/corpus/gen_math_corpus.c` feeds its fake.
-const RecordingPlatform = struct {
-    pub const Call = struct { motor_id: i32, speed: f32 };
-
-    var log: [16]Call = undefined;
-    var log_len: usize = 0;
-    var encoder_step: usize = 0;
-    /// Every `reset` flag the controller passed, in call order. Recording only
-    /// the last one hides a change to the other read - which is exactly what
-    /// happened when the first version of this fake kept only the last value.
-    var encoder_resets: [16]bool = undefined;
-    var encoder_reset_len: usize = 0;
-
-    const left_counts = [_]f32{ 25.0, 28.0, 24.0 };
-    const right_counts = [_]f32{ 27.0, 26.0, 30.0 };
-
-    pub fn setMotor(motor_id: i32, speed: f32) void {
-        if (log_len < log.len) {
-            log[log_len] = .{ .motor_id = motor_id, .speed = speed };
-            log_len += 1;
-        }
-    }
-
-    pub fn readEncoder(encoder_id: i32, reset: bool) f32 {
-        if (encoder_reset_len < encoder_resets.len) {
-            encoder_resets[encoder_reset_len] = reset;
-            encoder_reset_len += 1;
-        }
-        const counts = if (encoder_id == 1)
-            left_counts[encoder_step % 3]
-        else
-            right_counts[encoder_step % 3];
-        // The controller reads left then right; advance after the second.
-        if (encoder_id != 1) encoder_step += 1;
-        return counts;
-    }
-
-    fn clearLog() void {
-        log_len = 0;
-        encoder_step = 0;
-        encoder_reset_len = 0;
-    }
-
-    /// True only if every read so far asked for a reset.
-    fn allReadsReset() bool {
-        for (encoder_resets[0..encoder_reset_len]) |asked| {
-            if (!asked) return false;
-        }
-        return encoder_reset_len > 0;
-    }
-};
+const test_platform = @import("test_platform.zig");
+const RecordingPlatform = test_platform.Recording;
 
 fn testConfig() DifferentialConfig {
     return .{
@@ -282,12 +231,15 @@ test "differential drive: a run commands the motors the C version commands" {
     var left: [3]f32 = undefined;
     var right: [3]f32 = undefined;
     for (0..3) |i| {
+        // Which encoder samples this pass sees is set by the test, not advanced
+        // inside the fake: the platforms read three, four or one encoder.
+        RecordingPlatform.startPass(i);
         dd.update();
         // Two commands per pass, left first.
-        try std.testing.expectEqual(@as(i32, 1), RecordingPlatform.log[2 * i].motor_id);
-        try std.testing.expectEqual(@as(i32, 2), RecordingPlatform.log[2 * i + 1].motor_id);
-        left[i] = RecordingPlatform.log[2 * i].speed;
-        right[i] = RecordingPlatform.log[2 * i + 1].speed;
+        try std.testing.expectEqual(@as(i32, 1), RecordingPlatform.log[0].motor_id);
+        try std.testing.expectEqual(@as(i32, 2), RecordingPlatform.log[1].motor_id);
+        left[i] = RecordingPlatform.log[0].speed;
+        right[i] = RecordingPlatform.log[1].speed;
     }
     try corpus.expectValues("diffdrive_update_left", &left);
     try corpus.expectValues("diffdrive_update_right", &right);
@@ -298,8 +250,8 @@ test "differential drive: a run commands the motors the C version commands" {
 
     // And so is asking the encoder to reset after the read: the controller wants
     // the counts *since the last pass*, which only works if it says so.
-    try corpus.expectInt("diffdrive_encoder_reset_flag", @intFromBool(RecordingPlatform.allReadsReset()));
-    try std.testing.expect(RecordingPlatform.allReadsReset());
+    try corpus.expectInt("diffdrive_encoder_reset_flag", @intFromBool(RecordingPlatform.allResets()));
+    try std.testing.expect(RecordingPlatform.allResets());
 
     // Independent of the corpus: a turn in place drives the wheels towards
     // opposite targets, which is the kinematic relation the controller rests on.
@@ -333,9 +285,12 @@ test "differential drive: the tuned gains match the C answers" {
     var left: [3]f32 = undefined;
     var right: [3]f32 = undefined;
     for (0..3) |i| {
+        // Which encoder samples this pass sees is set by the test, not advanced
+        // inside the fake: the platforms read three, four or one encoder.
+        RecordingPlatform.startPass(i);
         dd.update();
-        left[i] = RecordingPlatform.log[2 * i].speed;
-        right[i] = RecordingPlatform.log[2 * i + 1].speed;
+        left[i] = RecordingPlatform.log[0].speed;
+        right[i] = RecordingPlatform.log[1].speed;
     }
     try corpus.expectValues("diffdrive_update_tuned_left", &left);
     try corpus.expectValues("diffdrive_update_tuned_right", &right);

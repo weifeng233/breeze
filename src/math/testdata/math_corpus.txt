@@ -312,3 +312,29 @@ mecanum_motor_id_0 11
 mecanum_motor_id_3 14
 mecanum_pure_rotation_targets -0.180000007 0.180000007 -0.180000007 0.180000007
 mecanum_rescaled_targets 0.298701286 0.99999994 0.298701286 0.99999994
+ackermann_speed_pid_kp 1
+ackermann_speed_pid_output_max 1
+ackermann_steering_pid_kp 1
+ackermann_target_speed_init 0
+ackermann_target_speed 0.5
+ackermann_target_steering 0.200000003
+ackermann_clamped_speed 1.5
+ackermann_clamped_steering -0.5
+ackermann_encoder_to_speed 18.8495407
+ackermann_angles_left_inner 0.214068741
+ackermann_angles_left_outer 0.187645987
+ackermann_angles_right_inner 0.214068741
+ackermann_angles_right_outer 0.187645987
+ackermann_angles_small_pos_inner 0.00499999989
+ackermann_angles_small_pos_outer 0.00499999989
+ackermann_angles_small_neg_inner -0.00499999989
+ackermann_angles_small_neg_outer -0.00499999989
+ackermann_angles_zero_inner 0
+ackermann_speed_setpoint 0.400000006
+ackermann_steering_setpoint 0.300000012
+ackermann_steering_integral_after 0
+ackermann_update_motors -0.627502322 0.600000024
+ackermann_drive_motor_id 1
+ackermann_steering_motor_id 2
+ackermann_run_drive -0.627502322 -0.410729319 0.324350506
+ackermann_run_steering 0.600000024 0.600000024 0.600000024

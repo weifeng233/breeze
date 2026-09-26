@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../../include/breeze/control/platform/ackermann_steering.h"
 #include "../../include/breeze/control/platform/differential_drive.h"
 #include "../../include/breeze/control/platform/mecanum_drive.h"
 #include "../../include/breeze/control/platform/omni_drive.h"
@@ -1215,6 +1216,96 @@ int main(void) {
         md_fast.wheel_pid[3].setpoint,
     };
     pvals("mecanum_rescaled_targets", mecanum_fast, 4);
+
+    /* --- ackermann steering ------------------------------------------------ */
+    BreezeAckermannSteering ak;
+    const BreezeAckermannConfig ak_cfg = {
+        0.3f,    /* wheelbase */
+        0.2f,    /* track_width */
+        0.03f,   /* wheel_radius */
+        1.5f,    /* max_speed */
+        0.5f,    /* max_steering_angle */
+        1,       /* drive_motor_id */
+        2,       /* steering_motor_id */
+        1,       /* encoder_id */
+        1000.0f, /* encoder_resolution */
+        1.0f     /* steering_ratio - stored and never read by anything */
+    };
+    float ak_inner;
+    float ak_outer;
+
+    BreezeAckermannSteering_Init(&ak, ak_cfg, fake_set_motor, fake_get_encoder, 0.01f);
+    pf("ackermann_speed_pid_kp", ak.speed_pid.kp);
+    pf("ackermann_speed_pid_output_max", ak.speed_pid.output_max);
+    pf("ackermann_steering_pid_kp", ak.steering_pid.kp);
+    pf("ackermann_target_speed_init", ak.target_speed);
+
+    BreezeAckermannSteering_SetTargets(&ak, 0.5f, 0.2f);
+    pf("ackermann_target_speed", ak.target_speed);
+    pf("ackermann_target_steering", ak.target_steering_angle);
+
+    /* Speed and steering are clamped separately, each to its own maximum. */
+    BreezeAckermannSteering_SetTargets(&ak, 9.0f, -9.0f);
+    pf("ackermann_clamped_speed", ak.target_speed);
+    pf("ackermann_clamped_steering", ak.target_steering_angle);
+
+    pf("ackermann_encoder_to_speed", BreezeAckermannSteering_EncoderToSpeed(&ak, 1000.0f));
+
+    /* The Ackermann geometry, and the place where turn direction is lost: above
+     * the small-angle branch the sign of the input disappears, against the
+     * function's own comment. The left and right cases below come out identical,
+     * while the small-angle pair comes out opposite - so the function is
+     * discontinuous in how it treats sign. */
+    BreezeAckermannSteering_CalculateWheelAngles(&ak, 0.2f, &ak_inner, &ak_outer);
+    pf("ackermann_angles_left_inner", ak_inner);
+    pf("ackermann_angles_left_outer", ak_outer);
+
+    BreezeAckermannSteering_CalculateWheelAngles(&ak, -0.2f, &ak_inner, &ak_outer);
+    pf("ackermann_angles_right_inner", ak_inner);
+    pf("ackermann_angles_right_outer", ak_outer);
+
+    BreezeAckermannSteering_CalculateWheelAngles(&ak, 0.005f, &ak_inner, &ak_outer);
+    pf("ackermann_angles_small_pos_inner", ak_inner);
+    pf("ackermann_angles_small_pos_outer", ak_outer);
+
+    BreezeAckermannSteering_CalculateWheelAngles(&ak, -0.005f, &ak_inner, &ak_outer);
+    pf("ackermann_angles_small_neg_inner", ak_inner);
+    pf("ackermann_angles_small_neg_outer", ak_outer);
+
+    BreezeAckermannSteering_CalculateWheelAngles(&ak, 0.0f, &ak_inner, &ak_outer);
+    pf("ackermann_angles_zero_inner", ak_inner);
+
+    /* One update. The steering output is a plain feedforward division, so the
+     * steering PID's setpoint is written and never computed - its integral is
+     * still zero afterwards. That is how the corpus records a knob that turns
+     * nothing. */
+    BreezeAckermannSteering_SetTargets(&ak, 0.4f, 0.3f);
+    g_motor_calls = 0;
+    g_encoder_step = 0;
+    BreezeAckermannSteering_Update(&ak);
+    pf("ackermann_speed_setpoint", ak.speed_pid.setpoint);
+    pf("ackermann_steering_setpoint", ak.steering_pid.setpoint);
+    pf("ackermann_steering_integral_after", ak.steering_pid.integral);
+    pvals("ackermann_update_motors", g_motor_speed, 2);
+    pi("ackermann_drive_motor_id", g_motor_id[0]);
+    pi("ackermann_steering_motor_id", g_motor_id[1]);
+
+    /* Three passes on a *fresh* controller: a case is reproducible from its own
+     * setup (REVIEW §35), and the run above left the speed PID with history. */
+    float ak_drive[3];
+    float ak_steer[3];
+    BreezeAckermannSteering ak_run;
+    BreezeAckermannSteering_Init(&ak_run, ak_cfg, fake_set_motor, fake_get_encoder, 0.01f);
+    BreezeAckermannSteering_SetTargets(&ak_run, 0.4f, 0.3f);
+    for (step_i = 0; step_i < 3; step_i++) {
+        g_motor_calls = 0;
+        g_encoder_step = step_i;
+        BreezeAckermannSteering_Update(&ak_run);
+        ak_drive[step_i] = g_motor_speed[0];
+        ak_steer[step_i] = g_motor_speed[1];
+    }
+    pvals("ackermann_run_drive", ak_drive, 3);
+    pvals("ackermann_run_steering", ak_steer, 3);
 
     return 0;
 }

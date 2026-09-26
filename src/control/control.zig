@@ -16,6 +16,7 @@ pub const state_feedback = @import("state_feedback.zig");
 pub const platform = @import("platform.zig");
 pub const omni = @import("omni.zig");
 pub const mecanum = @import("mecanum.zig");
+pub const ackermann = @import("ackermann.zig");
 
 pub const Pid = pid.Pid;
 pub const PidKind = pid.Kind;
@@ -27,6 +28,8 @@ pub const OmniDrive = omni.OmniDrive;
 pub const OmniKind = omni.OmniKind;
 pub const MecanumDrive = mecanum.MecanumDrive;
 pub const MecanumWheel = mecanum.Wheel;
+pub const AckermannSteering = ackermann.AckermannSteering;
+pub const WheelAngles = ackermann.WheelAngles;
 
 test {
     std.testing.refAllDecls(@This());

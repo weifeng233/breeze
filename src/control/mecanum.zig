@@ -183,51 +183,8 @@ pub fn MecanumDrive(comptime Platform: type) type {
 
 // --- tests ------------------------------------------------------------------
 
-const RecordingPlatform = struct {
-    pub const Call = struct { motor_id: i32, speed: f32 };
-
-    const seq = [4][3]f32{
-        .{ 25.0, 28.0, 24.0 },
-        .{ 27.0, 26.0, 30.0 },
-        .{ 26.0, 25.0, 29.0 },
-        .{ 28.0, 27.0, 25.0 },
-    };
-
-    var log: [16]Call = undefined;
-    var log_len: usize = 0;
-    var pass: usize = 0;
-    var resets: [16]bool = undefined;
-    var resets_len: usize = 0;
-
-    pub fn setMotor(motor_id: i32, speed: f32) void {
-        if (log_len < log.len) {
-            log[log_len] = .{ .motor_id = motor_id, .speed = speed };
-            log_len += 1;
-        }
-    }
-
-    pub fn readEncoder(encoder_id: i32, reset: bool) f32 {
-        if (resets_len < resets.len) {
-            resets[resets_len] = reset;
-            resets_len += 1;
-        }
-        const idx: usize = if (encoder_id >= 1 and encoder_id <= 4) @intCast(encoder_id - 1) else 0;
-        return seq[idx][pass % 3];
-    }
-
-    fn startPass(pass_index: usize) void {
-        log_len = 0;
-        resets_len = 0;
-        pass = pass_index;
-    }
-
-    fn allResets() bool {
-        for (resets[0..resets_len]) |r| {
-            if (!r) return false;
-        }
-        return resets_len > 0;
-    }
-};
+const test_platform = @import("test_platform.zig");
+const RecordingPlatform = test_platform.Recording;
 
 fn testMecanum() MecanumDrive(RecordingPlatform) {
     return MecanumDrive(RecordingPlatform).init(
