@@ -146,3 +146,36 @@ bezier_quadratic_t0 0 0
 bezier_cubic_t025 1.0625 1.6875
 bezier_cubic_t05 2.5 2.25
 bezier_cubic_t1 5 0
+lowpass_alpha_init 0.25
+lowpass_prev_output_init 10
+lowpass_run 10.5 11.125 11.09375 12.8203125 11.1152344
+lowpass_alpha_clamped_low 0
+lowpass_alpha_clamped_high 1
+lowpass_alpha_time_constant 0.166666657
+lowpass_alpha_set 0.5
+lowpass_alpha_set_time_constant 0.5
+lowpass_alpha_invalid_tc_unchanged 0.25
+lowpass_prev_output_invalid_tc_unchanged 10
+lowpass_alpha_invalid_set_tc_unchanged 0.25
+lowpass_first_update_uninitialised 7.5
+ewma_first_update_uninitialised 7.5
+lowpass_reset_then_update 6
+ewma_alpha_init 0.25
+ewma_avg_init 2
+ewma_run 4.5 6.625 7.71875 10.2890625 9.21679688
+ewma_reset_then_update 4.5
+highpass_alpha_init 0.25
+highpass_initialised_after_init 0
+highpass_run 0 0.25 -0.4375 1.640625 -2.58984375
+highpass_alpha_time_constant 0.833333313
+highpass_alpha_invalid_tc_unchanged 0.833333313
+highpass_reset_then_update 0
+dcblock_alpha_init 0.100000001
+dcblock_run 0 0.900000572 -0.989999771 5.4090004 -5.93190002
+dcblock_reset_then_update 0
+complementary_roll_init 0
+complementary_pitch_init 0
+complementary_alpha_init 0.899999976
+complementary_dt_init 0.00999999978
+complementary_run_roll 8.99999941e-05 0.00530721853 0.0148553848 0.0136398468 0.00712577952
+complementary_run_pitch 0 -0.0099641392 -0.0288182106 -0.0161495209 -0.0195878334

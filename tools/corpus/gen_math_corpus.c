@@ -22,13 +22,19 @@
  * artefact.
  *
  * Cases are added module by module as the migration proceeds; vector, matrix,
- * quaternion and interpolation are covered.
+ * quaternion and interpolation are covered, and the filters are being added.
+ *
+ * Stateful things (the filters) get one case per *run*: the values are the
+ * outputs in order, so a scenario is one line rather than one line per step.
  */
 
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 
+#include "../../include/breeze/filter/complementary_filter.h"
+#include "../../include/breeze/filter/high_pass_filter.h"
+#include "../../include/breeze/filter/low_pass_filter.h"
 #include "../../include/breeze/math/interpolation.h"
 #include "../../include/breeze/math/matrix.h"
 #include "../../include/breeze/math/quaternion.h"
@@ -536,6 +542,119 @@ int main(void) {
     pbp("bezier_cubic_t05", &bp);
     BreezeBezierCurve_Cubic(&bp0, &bp1, &bp2, &bp3, 1.0f, &bp);
     pbp("bezier_cubic_t1", &bp);
+
+    /* --- filters: the three recursive scalar ones ------------------------ */
+    /* Each `*_run` case is one scenario: the inputs are fixed here, and the
+     * values are the outputs in the order they came out. */
+    const float steps[] = {12.0f, 13.0f, 11.0f, 18.0f, 6.0f};
+    float run[8];
+    int step_i;
+
+    BreezeLowPassFilter lp;
+    BreezeEWMAFilter ew;
+    BreezeHighPassFilter hp;
+    BreezeDCBlocker dcb;
+    BreezeComplementaryFilter cf;
+
+    BreezeLowPassFilter_Init(&lp, 0.25f, 10.0f);
+    pf("lowpass_alpha_init", lp.alpha);
+    pf("lowpass_prev_output_init", lp.prev_output);
+    for (step_i = 0; step_i < 5; step_i++) run[step_i] = BreezeLowPassFilter_Update(&lp, steps[step_i]);
+    pvals("lowpass_run", run, 5);
+
+    /* alpha is clamped on the way in, in every entry point that takes one. */
+    BreezeLowPassFilter_Init(&lp, -1.0f, 0.0f);
+    pf("lowpass_alpha_clamped_low", lp.alpha);
+    BreezeLowPassFilter_Init(&lp, 2.0f, 0.0f);
+    pf("lowpass_alpha_clamped_high", lp.alpha);
+
+    /* Note the direction of this formula: sample time over the sum. The high
+     * pass version below divides the other way round. */
+    BreezeLowPassFilter_InitWithTimeConstant(&lp, 0.5f, 0.1f, 0.0f);
+    pf("lowpass_alpha_time_constant", lp.alpha);
+
+    BreezeLowPassFilter_Init(&lp, 0.25f, 0.0f);
+    BreezeLowPassFilter_SetAlpha(&lp, 0.5f);
+    pf("lowpass_alpha_set", lp.alpha);
+    BreezeLowPassFilter_SetTimeConstant(&lp, 0.5f, 0.5f);
+    pf("lowpass_alpha_set_time_constant", lp.alpha);
+
+    /* An invalid time constant is a silent no-op in C: nothing about the filter
+     * changes, including its previous output. Captured so the port'step_i decision to
+     * report an error instead is a documented difference and not a guess. */
+    BreezeLowPassFilter_Init(&lp, 0.25f, 10.0f);
+    BreezeLowPassFilter_InitWithTimeConstant(&lp, -1.0f, 0.1f, 99.0f);
+    pf("lowpass_alpha_invalid_tc_unchanged", lp.alpha);
+    pf("lowpass_prev_output_invalid_tc_unchanged", lp.prev_output);
+    BreezeLowPassFilter_SetTimeConstant(&lp, 0.0f, 0.1f);
+    pf("lowpass_alpha_invalid_set_tc_unchanged", lp.alpha);
+
+    /* A zero-initialised filter has never been initialised, and the first update
+     * passes its input straight through. */
+    BreezeLowPassFilter lp_fresh = {0.0f, 0.0f, 0};
+    pf("lowpass_first_update_uninitialised", BreezeLowPassFilter_Update(&lp_fresh, 7.5f));
+    BreezeEWMAFilter ew_fresh = {0.0f, 0.0f, 0};
+    pf("ewma_first_update_uninitialised", BreezeEWMAFilter_Update(&ew_fresh, 7.5f));
+
+    BreezeLowPassFilter_Init(&lp, 0.5f, 0.0f);
+    BreezeLowPassFilter_Reset(&lp, 4.0f);
+    pf("lowpass_reset_then_update", BreezeLowPassFilter_Update(&lp, 8.0f));
+
+    BreezeEWMAFilter_Init(&ew, 0.25f, 2.0f);
+    pf("ewma_alpha_init", ew.alpha);
+    pf("ewma_avg_init", ew.avg);
+    for (step_i = 0; step_i < 5; step_i++) run[step_i] = BreezeEWMAFilter_Update(&ew, steps[step_i]);
+    pvals("ewma_run", run, 5);
+    BreezeEWMAFilter_Reset(&ew, 3.0f);
+    pf("ewma_reset_then_update", BreezeEWMAFilter_Update(&ew, 9.0f));
+
+    /* High pass starts uninitialised even after Init - the alpha entry points
+     * deliberately leave `initialized` at zero. */
+    BreezeHighPassFilter_Init(&hp, 0.25f);
+    pf("highpass_alpha_init", hp.alpha);
+    pf("highpass_initialised_after_init", (float)hp.initialized);
+    for (step_i = 0; step_i < 5; step_i++) run[step_i] = BreezeHighPassFilter_Update(&hp, steps[step_i]);
+    pvals("highpass_run", run, 5);
+
+    BreezeHighPassFilter_InitWithTimeConstant(&hp, 0.5f, 0.1f);
+    pf("highpass_alpha_time_constant", hp.alpha);
+
+    BreezeHighPassFilter_InitWithTimeConstant(&hp, -1.0f, 0.1f);
+    pf("highpass_alpha_invalid_tc_unchanged", hp.alpha);
+
+    BreezeHighPassFilter_Init(&hp, 0.25f);
+    BreezeHighPassFilter_Reset(&hp, 5.0f);
+    pf("highpass_reset_then_update", BreezeHighPassFilter_Update(&hp, 5.0f));
+
+    BreezeDCBlocker_Init(&dcb, 0.1f);
+    pf("dcblock_alpha_init", dcb.alpha);
+    for (step_i = 0; step_i < 5; step_i++) run[step_i] = BreezeDCBlocker_Update(&dcb, steps[step_i]);
+    pvals("dcblock_run", run, 5);
+    BreezeDCBlocker_Reset(&dcb, 5.0f);
+    pf("dcblock_reset_then_update", BreezeDCBlocker_Update(&dcb, 5.0f));
+
+    /* Complementary: the roll and pitch outputs of the same run. */
+    const float gx[] = {0.01f, 0.02f, -0.01f, 0.03f, 0.0f};
+    const float gy[] = {0.0f, 0.01f, 0.02f, -0.02f, 0.01f};
+    const float ax[] = {0.0f, 0.1f, 0.2f, -0.1f, 0.05f};
+    const float ay[] = {0.0f, 0.05f, 0.1f, 0.0f, -0.05f};
+    const float az[] = {1.0f, 0.99f, 0.98f, 1.0f, 0.97f};
+    float roll_run[8];
+    float pitch_run[8];
+
+    BreezeComplementaryFilter_Init(&cf, 0.9f, 0.01f);
+    pf("complementary_roll_init", cf.roll);
+    pf("complementary_pitch_init", cf.pitch);
+    pf("complementary_alpha_init", cf.alpha);
+    pf("complementary_dt_init", cf.dt);
+    for (step_i = 0; step_i < 5; step_i++) {
+        /* gyro_z is passed but not used: the filter has no yaw state. */
+        BreezeComplementaryFilter_Update(&cf, gx[step_i], gy[step_i], 0.5f, ax[step_i], ay[step_i], az[step_i]);
+        roll_run[step_i] = BreezeComplementaryFilter_GetRoll(&cf);
+        pitch_run[step_i] = BreezeComplementaryFilter_GetPitch(&cf);
+    }
+    pvals("complementary_run_roll", roll_run, 5);
+    pvals("complementary_run_pitch", pitch_run, 5);
 
     return 0;
 }

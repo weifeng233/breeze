@@ -75,7 +75,7 @@ jobs:
         run: |
           kernel=$(zig test src/breeze.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
           app=$(zig test --dep breeze -Mroot=examples/smartcar/app_test.zig -Mbreeze=src/breeze.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
-          math=$(zig test src/math/math.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
+          math=$(zig test src/algorithms.zig 2>&1 | sed -n 's/^All \([0-9]*\) tests passed\.$/\1/p')
           claimed_kernel=$(grep -o '\*\*[0-9]* 个内核单元测试\*\*' README.md | head -1 | grep -o '[0-9]*')
           claimed_app=$(grep -o '\*\*[0-9]* 个应用测试\*\*' README.md | head -1 | grep -o '[0-9]*')
           claimed_math=$(grep -o '\*\*[0-9]* 个算法测试\*\*' README.md | head -1 | grep -o '[0-9]*')

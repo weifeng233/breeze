@@ -36,13 +36,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_app_tests.step);
 
     // The algorithm layer's tests are their own suite. They are not kernel
-    // tests - nothing under src/math/ imports the kernel - and the kernel suite's
-    // size is a claim README makes about the kernel, so folding algorithm tests
-    // into it would quietly change what that number means. The migration adds
-    // modules here one at a time (docs/ARCHITECTURE.md §8).
+    // tests - nothing under src/math/ or src/filter/ imports the kernel - and the
+    // kernel suite's size is a claim README makes about the kernel, so folding
+    // algorithm tests into it would quietly change what that number means. The
+    // migration adds stages here one at a time (docs/ARCHITECTURE.md §8); the
+    // root is src/algorithms.zig.
     const math_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/math/math.zig"),
+            .root_source_file = b.path("src/algorithms.zig"),
             .target = target,
             .optimize = optimize,
         }),

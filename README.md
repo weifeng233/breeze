@@ -4,7 +4,7 @@
 同一份内核可以在主机上用虚拟时钟运行，因此固件逻辑能在工作站上被精确断言。
 
 > **状态**：内核与模块系统已实现。`zig build ci` 通过：**109 个内核单元测试**、**14 个应用测试**、
-> **31 个算法测试**、**7 个目标交叉编译**（CYT2BL3、CYT4BB7 的 CM0+ 与 CM7、RT1064 各有一个具名目标）。
+> **43 个算法测试**、**7 个目标交叉编译**（CYT2BL3、CYT4BB7 的 CM0+ 与 CM7、RT1064 各有一个具名目标）。
 > 这些数字由 CI 校验，不允许漂移（见 `.github/workflows/ci.yml`）。
 > **C 算法层**（`include/`、`src/`）保留为迁移到 Zig 时的对照实现，已经修好：
 > **35 个头文件**、**5 个示例**、**2 个应用**、**11 个通信测试（42 条断言）**，
@@ -123,7 +123,7 @@ const frame = try Attitude.pack(&buf, &value, timestamp_us);
 ## 构建
 
 ```bash
-zig build test           # 109 个内核单元测试 + 14 个应用测试 + 31 个算法测试
+zig build test           # 109 个内核单元测试 + 14 个应用测试 + 43 个算法测试
 zig build demo           # 主机虚拟时钟演示
 zig build check-targets  # 交叉编译 7 个目标
 zig build ci             # 格式检查 + 测试 + 目标编译
